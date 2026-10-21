@@ -39,6 +39,13 @@ impl SheetsDocument {
         out
     }
 
+    /// Rows whose automatic height the UI should measure (wrapped text, big
+    /// fonts, line breaks); see `Sheet::rows_to_measure`.
+    #[wasm_bindgen(js_name = rowsToMeasure)]
+    pub fn rows_to_measure(&self, sheet: usize) -> Vec<u32> {
+        self.sheet(sheet).rows_to_measure()
+    }
+
     /// Hidden columns as `[first, last, first, last, ...]`.
     #[wasm_bindgen(js_name = hiddenColumns)]
     pub fn hidden_columns(&self, sheet: usize) -> Vec<u32> {

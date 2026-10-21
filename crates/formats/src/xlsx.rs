@@ -992,7 +992,10 @@ mod tests {
         assert!(sheet_xml.contains(r#"<mergeCells count="1"><mergeCell ref="A1:C2"/></mergeCells>"#));
         let custom = px_to_chars(150.0);
         let default = px_to_chars(sheets_engine::sheet::DEFAULT_COL_WIDTH);
-        assert!(sheet_xml.contains(&format!(r#"<col min="3" max="3" width="{custom}" hidden="1" customWidth="1"/>"#)), "{sheet_xml}");
+        assert!(
+            sheet_xml.contains(&format!(r#"<col min="3" max="3" width="{custom}" hidden="1" customWidth="1"/>"#)),
+            "{sheet_xml}"
+        );
         assert!(sheet_xml.contains(&format!(r#"<col min="4" max="5" width="{default}" hidden="1"/>"#)), "{sheet_xml}");
 
         let back = read(&bytes).unwrap();

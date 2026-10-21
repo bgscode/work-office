@@ -6,6 +6,8 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Added
 
+- Grid layout: row heights (drag the row border, double-click to autofit, Row Height / Column Width dialogs in Excel's units), automatic row height for wrapped text and bigger fonts, hide/unhide rows and columns, Merge & Center / Across / Cells / Unmerge (selection and arrow keys treat merged cells as one), Freeze Panes (at selection, top row, first column). All saved in .xlsx.
+
 - Cell formatting: font family and size boxes, increase/decrease font size, Borders menu with Excel's presets, line styles and colours, Wrap Text, top/middle/bottom alignment, Format Painter; Alt+Enter turns on Wrap Text. All saved in .xlsx (fonts, borders, alignment).
 
 - Home page in the style of the Microsoft 365 start page: app rail, Start new tiles (blank workbook; document and presentation marked coming soon), open or drag-and-drop .xlsx/.csv, and Recent files with search and app filters. Every workbook is autosaved separately in the browser (up to 20) and listed in Recent. Apps open at `#/sheets/<id>`, so Back and refresh work. The title bar now has a Home button instead of the app switcher.

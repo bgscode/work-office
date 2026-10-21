@@ -60,11 +60,11 @@ When you finish an item, update its row in the same pull request.
 | Column width: drag, autofit | ✅ | P1 | – |
 | Font family and font size (incl. Hindi fonts Mangal / Nirmala UI), increase/decrease size | ✅ | P1 | M2 |
 | Borders (Excel's presets, line styles, line colours) | ✅ | P1 | M2 |
-| Merge & centre / unmerge | ⬜ | P1 | M2 |
-| Wrap text (drawn in the cell; rows don't grow to fit yet — comes with row heights) | 🟡 | P1 | M2 |
+| Merge & Center, Merge Across, Merge Cells, Unmerge | ✅ | P1 | M2 |
+| Wrap text (rows grow to fit, like Excel's automatic row height) | ✅ | P1 | M2 |
 | Vertical alignment (top / middle / bottom) | ✅ | P1 | M2 |
-| Row height: drag, autofit | ⬜ | P1 | M2 |
-| Hide / unhide rows and columns | ⬜ | P1 | M2 |
+| Row height: drag, double-click to autofit, Row Height dialog (points); automatic height for big fonts and wrapped text | ✅ | P1 | M2 |
+| Hide / unhide rows and columns | ✅ | P1 | M2 |
 | Format Painter (click once, double-click to keep painting, Esc to stop) | ✅ | P1 | M2 |
 | Conditional formatting: highlight rules (>, <, between, equal, text contains, duplicates) | ⬜ | P1 | M4 |
 | Conditional formatting: colour scales, data bars, icon sets | ⬜ | P2 | – |
@@ -100,7 +100,7 @@ When you finish an item, update its row in the same pull request.
 | Feature | Status | Priority | Milestone |
 |---|---|---|---|
 | Sort by one column, A→Z / Z→A | ✅ | P1 | – |
-| Freeze panes (top row, first column, at selection) | ⬜ | P1 | M4 |
+| Freeze panes (top row, first column, at selection) | ✅ | P1 | M4 |
 | Filter (AutoFilter dropdowns: by value, text/number conditions, sort from header) | ⬜ | P1 | M4 |
 | Data validation: dropdown lists, number/date limits, error message | ⬜ | P1 | M4 |
 | Remove duplicates | ⬜ | P1 | M4 |
@@ -176,7 +176,7 @@ Done in this order; each one is usable on its own.
 | # | Milestone | Contents |
 |---|---|---|
 | M1 ✅ | Editing & navigation | Alt+Enter, Ctrl+Enter, Paste Special, Replace, Ctrl+arrows, Ctrl+Home/End, Go To / Name Box, row/column select shortcuts, zoom |
-| M2 | Formatting | Font family/size, borders, merge, wrap, vertical alignment, row height, hide/unhide, Format Painter |
+| M2 ✅ | Formatting | Font family/size, borders, merge, wrap, vertical alignment, row height, hide/unhide, Format Painter |
 | M3 | Formulas | Cross-sheet references, `A:A` references, F4, volatile functions, `SUBTOTAL`/`AGGREGATE`/`ROW`/`COLUMN`, financial functions |
 | M4 | Data tools | Freeze panes, filter, data validation dropdowns, remove duplicates, conditional formatting (highlight rules) |
 | M5 | Charts | Column, bar, line, pie |

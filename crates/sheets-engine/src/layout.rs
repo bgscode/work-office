@@ -15,9 +15,8 @@ use crate::sheet::Sheet;
 use crate::style::{Align, Style, StylePatch};
 use crate::workbook::Workbook;
 
-/// Row height in CSS pixels when none is set. (Excel's 15pt row is 20px;
-/// the grid uses 22px for a little more breathing room.)
-pub const DEFAULT_ROW_HEIGHT: f64 = 22.0;
+/// Row height in CSS pixels when none is set: Excel's default 15pt row.
+pub const DEFAULT_ROW_HEIGHT: f64 = 20.0;
 
 /// Tallest row Excel allows: 409 points.
 pub const MAX_ROW_HEIGHT: f64 = 409.0 / 0.75;

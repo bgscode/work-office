@@ -28,6 +28,9 @@ import {
   type Selection,
 } from "./geometry";
 import { alignmentCommands, bordersCommand, fontCommands, painterCommand, type BorderLineChoice, type FormattingContext, type PainterMode } from "./features/formatting";
+import { SizeDialog, formatMenuItems, freezeCommand, mergeCommand, type Axis, type LayoutContext, type MergeKind } from "./features/layout";
+import { navigate } from "./merges";
+import { buildGeometry } from "./sheetGeometry";
 import { Grid, fillArea, type FillDirection, type GridShortcut } from "./Grid";
 import { fontFor } from "./paint";
 import { NameBox } from "./NameBox";
@@ -119,11 +122,19 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
   const { row, col } = selection.anchor;
   const sel = selectionRect(selection);
   const activeStyle = parseStyle(doc.styleBlock(sheet, row, col, 1, 1)[0]);
+  // Row heights (incl. automatic ones), column widths, hidden lines, merges, frozen panes.
+  const geo = useMemo(() => buildGeometry(doc, sheet), [doc, sheet, revision]);
 
   /** Select and scroll into view. */
-  function goTo(s: Selection) {
-    setSelection(s);
-    setReveal((r) => ({ row: s.focus.row, col: s.focus.col, seq: (r?.seq ?? 0) + 1 }));
+  /**
+   * Select (snapping to merged cells) and scroll into view. Go To and Find show
+   * the start of the range, like Excel; Ctrl+Shift+arrow shows the moving end.
+   */
+  function goTo(s: Selection, show: "anchor" | "focus" = "anchor") {
+    const next = geo.merges.normalize(s);
+    setSelection(next);
+    const cell = show === "anchor" ? next.anchor : next.focus;
+    setReveal((r) => ({ row: cell.row, col: cell.col, seq: (r?.seq ?? 0) + 1 }));
   }
 
   function setZoom(z: number) {
@@ -191,7 +202,7 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
       changed();
     }
     setEditing(null);
-    if (dRow || dCol) setSelection(moveSelection(selection, dRow, dCol, false));
+    if (dRow || dCol) setSelection(navigate(selection, dRow, dCol, false, geo));
   }
 
   /**
@@ -510,6 +521,68 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
 
   // ---- columns
 
+  // ---- rows: heights, autofit; hide/unhide; merges; freeze panes
+
+  const wholeRows = sel.left === 0 && sel.right === MAX_COLS - 1;
+  const wholeCols = sel.top === 0 && sel.bottom === MAX_ROWS - 1;
+  const [sizeDialog, setSizeDialog] = useState<Axis | null>(null);
+
+  function resizeRow(r: number, px: number) {
+    // Resizing one of several selected whole rows resizes them all.
+    const many = wholeRows && r >= sel.top && r <= sel.bottom;
+    doc.setRowHeight(sheet, many ? sel.top : r, many ? sel.bottom : r, px);
+    changed();
+  }
+
+  /** Back to automatic height, which grows to fit wrapped text and big fonts. */
+  function autofitRow(r: number) {
+    const many = wholeRows && r >= sel.top && r <= sel.bottom;
+    doc.setRowHeight(sheet, many ? sel.top : r, many ? sel.bottom : r, -1);
+    changed();
+  }
+
+  /** Rows or columns the selection covers, limited to where there is data for whole-sheet selections. */
+  function lineSpanOf(axis: Axis): [number, number] {
+    const [rows, cols] = doc.extent(sheet);
+    if (axis === "rows") return [sel.top, Math.min(sel.bottom, wholeCols ? Math.max(rows, sel.top + 1) - 1 : sel.bottom)];
+    return [sel.left, Math.min(sel.right, wholeRows ? Math.max(cols, sel.left + 1) - 1 : sel.right)];
+  }
+
+  const layoutCtx: LayoutContext = {
+    sel,
+    merges: geo.merges,
+    freeze: geo.freeze,
+    active: selection.anchor,
+    merge(kind: MergeKind) {
+      if (doc.mergeDiscardsData(sheet, sel.top, sel.left, sel.bottom, sel.right, kind)) {
+        if (!confirm("Merging cells only keeps the upper-left value and discards other values.")) return;
+      }
+      doc.mergeCells(sheet, sel.top, sel.left, sel.bottom, sel.right, kind);
+      setSelection(single(selection.anchor));
+      changed();
+    },
+    unmerge() {
+      doc.unmergeCells(sheet, sel.top, sel.left, sel.bottom, sel.right);
+      changed();
+    },
+    setFreeze(rows: number, cols: number) {
+      doc.setFreezePanes(sheet, rows, cols);
+      changed();
+    },
+    setHidden(axis: Axis, hidden: boolean) {
+      const [first, last] = lineSpanOf(axis);
+      doc.setHidden(sheet, axis, first, last, hidden);
+      changed();
+    },
+    openSizeDialog: setSizeDialog,
+    autofit(axis: Axis) {
+      const [first, last] = lineSpanOf(axis);
+      if (axis === "rows") doc.setRowHeight(sheet, first, last, -1);
+      else for (let c = first; c <= last; c++) autofit(c);
+      changed();
+    },
+  };
+
   function resizeColumn(c: number, px: number) {
     // Resizing one of several selected whole columns resizes them all.
     const wholeCols = sel.top === 0 && sel.bottom === MAX_ROWS - 1 && c >= sel.left && c <= sel.right;
@@ -559,6 +632,10 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
     const single = sel.top === sel.bottom && sel.left === sel.right;
     const r = single ? { top: 1, left: 0, bottom: rows - 1, right: cols - 1 } : dataRect();
     if (!r || r.bottom <= r.top) return;
+    if (!doc.canSort(sheet, r.top, r.left, r.bottom, r.right)) {
+      alert("To do this, all the merged cells need to be the same size.");
+      return;
+    }
     doc.sortRange(sheet, r.top, r.left, r.bottom, r.right, col, ascending);
     changed();
   }
@@ -588,7 +665,7 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
     const from = extend ? selection.focus : selection.anchor;
     const [r, c] = doc.jump(sheet, from.row, from.col, dRow, dCol);
     const to: Cell = { row: r, col: c };
-    goTo(extend ? { anchor: selection.anchor, focus: to } : single(to));
+    goTo(extend ? { anchor: selection.anchor, focus: to } : single(to), extend ? "focus" : "anchor");
   }
 
   function shortcut(s: GridShortcut) {
@@ -724,6 +801,20 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
       { label: "Insert column right", onRun: () => insertLines("cols", true), icon: "insertColumnRight" },
       { label: "Delete rows", onRun: () => deleteLines("rows"), separatorBefore: true, icon: "deleteRows" },
       { label: "Delete columns", onRun: () => deleteLines("cols"), icon: "deleteColumns" },
+      ...(wholeRows
+        ? [
+            { label: "Row Height…", onRun: () => setSizeDialog("rows"), separatorBefore: true },
+            { label: "Hide", onRun: () => layoutCtx.setHidden("rows", true) },
+            { label: "Unhide", onRun: () => layoutCtx.setHidden("rows", false) },
+          ]
+        : []),
+      ...(wholeCols
+        ? [
+            { label: "Column Width…", onRun: () => setSizeDialog("cols"), separatorBefore: true },
+            { label: "Hide", onRun: () => layoutCtx.setHidden("cols", true) },
+            { label: "Unhide", onRun: () => layoutCtx.setHidden("cols", false) },
+          ]
+        : []),
       { label: "Sort A → Z", onRun: () => sort(true), separatorBefore: true, icon: "sortAsc" },
       { label: "Sort Z → A", onRun: () => sort(false), icon: "sortDesc" },
       { label: "Clear contents", shortcut: "Del", onRun: clear, separatorBefore: true, icon: "clear" },
@@ -867,6 +958,7 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
         { id: "align-left", newRow: true, label: "Align Left", title: "Align your content to the left.", icon: "alignLeft", group: "Alignment", active: activeStyle.align === "left", onRun: () => format("align", "left") },
         { id: "align-center", label: "Center", title: "Center your content.", icon: "alignCenter", group: "Alignment", active: activeStyle.align === "center", onRun: () => format("align", "center") },
         { id: "align-right", label: "Align Right", title: "Align your content to the right.", icon: "alignRight", group: "Alignment", active: activeStyle.align === "right", onRun: () => format("align", "right") },
+        mergeCommand(layoutCtx),
         {
           id: "format",
           label: "Number Format",
@@ -921,12 +1013,12 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
         {
           id: "cells-format",
           label: "Format",
-          title: "Change column width, or rename the sheet.",
+          title: "Change row height or column width, hide rows or columns, or rename the sheet.",
           icon: "formatCells",
           size: "small",
           group: "Cells",
           menu: [
-            { id: "menu-autofit", label: "AutoFit Column Width", onRun: () => autofit(col) },
+            ...formatMenuItems(layoutCtx),
             { id: "menu-rename-sheet", label: "Rename Sheet", icon: "rename", onRun: () => setRenamingTab(sheet), separatorBefore: true },
           ],
         },
@@ -1020,6 +1112,7 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
           menu: ZOOM_LEVELS.map((z) => ({ id: `zoom-${z * 100}`, label: `${Math.round(z * 100)}%`, active: z === zoom, onRun: () => setZoom(z) })),
         },
         { id: "zoom-100", label: "100%", title: "Zoom to 100% of the normal size.", icon: "zoom100", size: "large", group: "Zoom", onRun: () => setZoom(1) },
+        freezeCommand(layoutCtx),
         { id: "zoom-selection", label: "Zoom to Selection", title: "Zoom so the selected cells fill the window.", icon: "zoomSelection", size: "large", group: "Zoom", onRun: zoomToSelection },
       ],
     },
@@ -1051,7 +1144,7 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
         nameBox={
           <NameBox
             ref={nameBoxRef}
-            label={rangeName(selection)}
+            label={geo.merges.label(selection)}
             onGo={goTo}
             onDone={() => cellInputRef.current?.focus({ preventScroll: true })}
           />
@@ -1098,6 +1191,9 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
           onFill={fill}
           onFillToEnd={fillToEnd}
           onResizeColumn={resizeColumn}
+          onResizeRow={resizeRow}
+          onAutofitRow={autofitRow}
+          geo={geo}
           onAutofit={autofit}
           onContextMenu={cellMenu}
           onShortcut={shortcut}
@@ -1146,6 +1242,22 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
         onHover={setAssistIndex}
       />
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+      {sizeDialog && (
+        <SizeDialog
+          axis={sizeDialog}
+          px={sizeDialog === "rows" ? geo.rows.height(sel.top) : geo.cols.width(sel.left)}
+          onApply={(px) => {
+            const [first, last] = lineSpanOf(sizeDialog);
+            if (sizeDialog === "rows") doc.setRowHeight(sheet, first, last, px);
+            else doc.setColumnWidth(sheet, first, last, px);
+            changed();
+          }}
+          onClose={() => {
+            setSizeDialog(null);
+            cellInputRef.current?.focus({ preventScroll: true });
+          }}
+        />
+      )}
       {insertFunctionOpen && <InsertFunctionDialog onInsert={closeInsertFunction} onClose={() => closeInsertFunction(null)} />}
     </div>
   );

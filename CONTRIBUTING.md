@@ -60,7 +60,9 @@ Sheets UI files in `apps/web/src/sheets/`:
 | `SheetsApp.tsx` | All UI state; turns actions into engine calls; ribbon, menus, autocomplete logic |
 | `Grid.tsx` | Mouse and keyboard on the grid: selection, point mode, fill handle, column resize |
 | `paint.ts` | Draws the visible cells, styles, highlights and headers on the canvas |
-| `layout.ts` | Column positions with custom widths |
+| `layout.ts` | Row/column positions with custom sizes and hidden lines (fast for 1M rows) |
+| `sheetGeometry.ts` | Builds the geometry from the engine, incl. automatic row heights |
+| `panes.ts`, `merges.ts` | Frozen panes; merged cells and Excel-style navigation |
 | `formulaText.ts` | Reading formula text: references, word at caret, enclosing function |
 | `geometry.ts`, `clipboard.ts` | Selection maths, tab-separated clipboard text |
 | `FormulaBar`, `FormulaAssist`, `ContextMenu`, `FindBar`, `SheetTabs` | Smaller components |

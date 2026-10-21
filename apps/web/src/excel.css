@@ -1198,3 +1198,9 @@ textarea.cell-editor {
 .fmt-combo-list li:hover {
   background: #cfe4d6;
 }
+
+.dialog-error {
+  margin: 4px 0 0;
+  color: #c50f1f;
+  font-size: 12px;
+}

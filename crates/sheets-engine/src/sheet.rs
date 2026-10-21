@@ -203,6 +203,25 @@ impl Sheet {
         self.col_widths.iter().map(|(c, w)| (*c, *w))
     }
 
+    /// Rows whose automatic height may exceed the default: they hold a cell
+    /// with Wrap Text and content, a font bigger than the default, or a line
+    /// break. The UI measures only these rows (row autofit, like Excel).
+    pub fn rows_to_measure(&self) -> Vec<u32> {
+        let mut rows: Vec<u32> = self
+            .styles
+            .iter()
+            .filter(|(at, st)| {
+                st.font_size.is_some_and(|sz| sz > crate::style::DEFAULT_FONT_SIZE)
+                    || (st.wrap && !self.input(**at).is_empty())
+            })
+            .map(|(at, _)| at.row)
+            .chain(self.cells.iter().filter(|(_, c)| c.input.contains('\n')).map(|(at, _)| at.row))
+            .collect();
+        rows.sort_unstable();
+        rows.dedup();
+        rows
+    }
+
     pub fn layout(&self) -> &SheetLayout {
         &self.layout
     }
@@ -696,6 +715,15 @@ mod tests {
         assert_eq!(sorted.value(at("C2")), &Value::Number(6.0));
         let desc = s.with_sorted_rows(Range::new(at("A1"), at("B2")), 1, false);
         assert_eq!(desc.input(at("A1")), "apple");
+    }
+
+    #[test]
+    fn lists_rows_to_measure() {
+        let mut s = sheet(&[("A1", "plain"), ("A3", "line\nbreak"), ("B5", "wrapped")]);
+        s.set_style(at("B5"), Style { wrap: true, ..Style::default() });
+        s.set_style(at("C7"), Style { font_size: Some(240), ..Style::default() });
+        s.set_style(at("D9"), Style { wrap: true, ..Style::default() }); // wrap but empty
+        assert_eq!(s.rows_to_measure(), vec![2, 4, 6]);
     }
 
     #[test]
