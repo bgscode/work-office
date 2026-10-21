@@ -1,9 +1,18 @@
+use crate::page_setup::PageSetup;
 use crate::sheet::Sheet;
 
 #[derive(Debug, Clone)]
 pub struct Worksheet {
     pub name: String,
     pub sheet: Sheet,
+    /// How the sheet prints (Page Layout settings).
+    pub page_setup: PageSetup,
+}
+
+impl Worksheet {
+    pub fn new(name: String, sheet: Sheet) -> Self {
+        Worksheet { name, sheet, page_setup: PageSetup::default() }
+    }
 }
 
 /// A file: an ordered list of named sheets.
@@ -21,7 +30,7 @@ impl Default for Workbook {
 impl Workbook {
     /// A workbook with one empty "Sheet1".
     pub fn new() -> Self {
-        Workbook { sheets: vec![Worksheet { name: "Sheet1".into(), sheet: Sheet::new() }] }
+        Workbook { sheets: vec![Worksheet::new("Sheet1".into(), Sheet::new())] }
     }
 
     /// An empty workbook, for importers that add their own sheets.
@@ -39,7 +48,7 @@ impl Workbook {
     }
 
     pub fn push_sheet(&mut self, name: String, sheet: Sheet) -> usize {
-        self.sheets.push(Worksheet { name, sheet });
+        self.sheets.push(Worksheet::new(name, sheet));
         self.sheets.len() - 1
     }
 }

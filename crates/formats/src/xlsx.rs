@@ -30,6 +30,9 @@ use sheets_engine::{Align, CellRef, ErrorKind, NumberFormat, Sheet, Style, Value
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
+#[path = "xlsx_page_setup.rs"]
+mod page_setup;
+
 const NS_MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const NS_REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const NS_PKG_REL: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
@@ -93,6 +96,7 @@ pub fn read(bytes: &[u8]) -> Result<Workbook> {
     };
 
     let mut book = Workbook::empty();
+    let sheet_order: Vec<String> = sheet_list(&workbook_xml).into_iter().map(|(name, _)| name).collect();
     for (name, rid) in sheet_list(&workbook_xml) {
         let Some(rel) = rels.iter().find(|r| r.id == rid) else { continue };
         let xml = part(&mut zip, &resolve(&rel.target))?.unwrap_or_default();
@@ -108,8 +112,10 @@ pub fn read(bytes: &[u8]) -> Result<Workbook> {
             sheet.set_col_width(col, Some(width));
         }
         sheet.set_inputs(data.cells);
-        book.push_sheet(name, sheet);
+        let index = book.push_sheet(name, sheet);
+        book.sheets[index].page_setup = page_setup::read_sheet(&xml);
     }
+    page_setup::apply_defined_names(&workbook_xml, &sheet_order, &mut book);
     if book.sheets.is_empty() {
         return Err(OfficeError::Parse("workbook has no worksheets".into()));
     }
@@ -460,7 +466,9 @@ pub fn write(book: &Workbook) -> Result<Vec<u8>> {
         rels.push_str(&format!(
             r#"<Relationship Id="rId{id}" Type="{NS_REL}/worksheet" Target="worksheets/sheet{id}.xml"/>"#
         ));
-        parts.push((format!("xl/worksheets/sheet{id}.xml"), worksheet_xml(&ws.sheet, &mut styles)));
+        let sheet_xml = worksheet_xml(&ws.sheet, &mut styles);
+        let sheet_xml = page_setup::insert_into_worksheet(sheet_xml, &ws.page_setup);
+        parts.push((format!("xl/worksheets/sheet{id}.xml"), sheet_xml));
     }
     // Ask Excel to recalculate on open, since our cached values may differ slightly.
     workbook.push_str(r#"</sheets><calcPr calcId="0" fullCalcOnLoad="1"/></workbook>"#);
@@ -468,7 +476,9 @@ pub fn write(book: &Workbook) -> Result<Vec<u8>> {
         r#"<Relationship Id="rId{}" Type="{NS_REL}/styles" Target="styles.xml"/></Relationships>"#,
         n + 1
     ));
+    let workbook = page_setup::insert_defined_names(workbook, book);
     parts.push(("xl/workbook.xml".into(), workbook));
+
     parts.push(("xl/_rels/workbook.xml.rels".into(), rels));
     parts.push(("xl/styles.xml".into(), styles.finish_xml()));
 

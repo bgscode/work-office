@@ -227,10 +227,7 @@ mod tests {
         assert!(wb.sheets[0].sheet.style(a1).is_default());
         assert_eq!(wb.sheets[0].sheet.col_width(0), crate::sheet::DEFAULT_COL_WIDTH);
 
-        history.apply(
-            &mut wb,
-            Box::new(InsertSheet { index: 1, sheet: Worksheet { name: "New".into(), sheet: Sheet::new() } }),
-        );
+        history.apply(&mut wb, Box::new(InsertSheet { index: 1, sheet: Worksheet::new("New".into(), Sheet::new()) }));
         history.apply(&mut wb, Box::new(RenameSheet { index: 1, name: "Renamed".into() }));
         history.apply(&mut wb, Box::new(RemoveSheet { index: 0 }));
         assert_eq!(wb.sheets.len(), 1);
