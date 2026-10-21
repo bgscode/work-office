@@ -1,0 +1,363 @@
+/* Home page, in the style of the Microsoft 365 start page. */
+
+.home {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #faf9f8;
+  color: #242424;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+
+.home-top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 48px;
+  padding: 0 16px;
+  background: #fff;
+  border-bottom: 1px solid #e1dfdd;
+}
+
+.home-brand {
+  width: 220px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.home-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 1 560px;
+  height: 32px;
+  padding: 0 12px;
+  background: #f3f2f1;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #605e5c;
+}
+
+.home-search:focus-within {
+  background: #fff;
+  border-color: #8a8886;
+}
+
+.home-search input {
+  flex: 1;
+  border: 0;
+  outline: none;
+  background: none;
+  font: 14px "Segoe UI", system-ui, sans-serif;
+}
+
+.home-top-spacer {
+  flex: 1;
+}
+
+.home-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.home-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 72px;
+  padding: 8px 0;
+  background: #fff;
+  border-right: 1px solid #e1dfdd;
+}
+
+.home-rail button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 64px;
+  padding: 8px 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: #424242;
+  font-size: 11px;
+}
+
+.home-rail button:hover {
+  background: #f3f2f1;
+}
+
+.home-rail button.active {
+  color: #0f6cbd;
+  font-weight: 600;
+}
+
+.home-rail hr {
+  width: 40px;
+  border: 0;
+  border-top: 1px solid #e1dfdd;
+  margin: 6px 0;
+}
+
+.home-main {
+  flex: 1;
+  overflow: auto;
+  padding: 28px 48px 48px;
+}
+
+.home-main h1 {
+  margin: 0 0 24px;
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.home-main h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.home-main section {
+  max-width: 1080px;
+  margin-bottom: 32px;
+}
+
+.home-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.home-tile {
+  display: flex;
+  flex-direction: column;
+  width: 168px;
+  padding: 0;
+  border: 1px solid #e1dfdd;
+  border-radius: 6px;
+  background: #fff;
+  overflow: hidden;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: box-shadow 0.15s;
+}
+
+.home-tile:hover:not(:disabled) {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14);
+  border-color: #c8c6c4;
+}
+
+.home-tile:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.tile-preview {
+  display: grid;
+  place-items: center;
+  height: 112px;
+  background: #f5f5f5;
+  border-bottom: 1px solid #e1dfdd;
+}
+
+.tile-preview.open {
+  color: #605e5c;
+}
+
+.tile-grid {
+  width: 120px;
+  height: 84px;
+  background:
+    linear-gradient(#d4d4d4 1px, transparent 1px) 0 0 / 24px 14px,
+    linear-gradient(90deg, #d4d4d4 1px, transparent 1px) 0 0 / 24px 14px,
+    #fff;
+  border: 1px solid #d4d4d4;
+  box-shadow: inset 0 3px 0 #217346;
+}
+
+.tile-lines {
+  width: 84px;
+  height: 96px;
+  background:
+    repeating-linear-gradient(#fff 0 10px, #c8c6c4 10px 12px) 12px 14px / 60px 70px no-repeat,
+    #fff;
+  border: 1px solid #d4d4d4;
+}
+
+.tile-slide {
+  width: 128px;
+  height: 72px;
+  background:
+    linear-gradient(#c43e1c, #c43e1c) 20px 22px / 88px 8px no-repeat,
+    linear-gradient(#d4d4d4, #d4d4d4) 34px 40px / 60px 5px no-repeat,
+    #fff;
+  border: 1px solid #d4d4d4;
+}
+
+.tile-label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.tile-label em {
+  width: 100%;
+  font-style: normal;
+  font-size: 11px;
+  color: #605e5c;
+}
+
+.home-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 24px;
+}
+
+.home-filters {
+  display: flex;
+  gap: 4px;
+}
+
+.home-filters button {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 14px;
+  background: none;
+  font: 13px "Segoe UI", system-ui, sans-serif;
+  color: #424242;
+}
+
+.home-filters button:hover {
+  background: #f3f2f1;
+}
+
+.home-filters button.active {
+  background: #e1dfdd;
+  font-weight: 600;
+}
+
+.home-recent {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid #e1dfdd;
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 13px;
+}
+
+.home-recent th {
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: #605e5c;
+  border-bottom: 1px solid #e1dfdd;
+}
+
+.home-recent td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #f3f2f1;
+}
+
+.home-recent tbody tr {
+  cursor: pointer;
+}
+
+.home-recent tbody tr:hover,
+.home-recent tbody tr:focus-visible {
+  background: #f5f5f5;
+  outline: none;
+}
+
+.recent-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.recent-time {
+  width: 160px;
+  color: #605e5c;
+}
+
+.recent-actions {
+  width: 40px;
+  text-align: right;
+}
+
+.recent-actions button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: #605e5c;
+  font-size: 16px;
+  opacity: 0;
+}
+
+.home-recent tr:hover .recent-actions button,
+.recent-actions button:focus-visible {
+  opacity: 1;
+}
+
+.recent-actions button:hover {
+  background: #e1dfdd;
+}
+
+.home-empty,
+.home-note {
+  color: #605e5c;
+  font-size: 13px;
+}
+
+.home-drop {
+  position: absolute;
+  inset: 12px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed #217346;
+  border-radius: 12px;
+  background: rgba(33, 115, 70, 0.06);
+  font-size: 18px;
+  color: #217346;
+  pointer-events: none;
+}
+
+.coming-soon {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #424242;
+  text-align: center;
+}
+
+.coming-soon h1 {
+  margin: 8px 0 0;
+  font-size: 22px;
+}
+
+.coming-soon p {
+  max-width: 420px;
+  margin: 0;
+}
+
+.coming-soon button {
+  margin-top: 8px;
+  padding: 6px 16px;
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  background: #fff;
+  font: 13px "Segoe UI", system-ui, sans-serif;
+}

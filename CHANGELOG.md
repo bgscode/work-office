@@ -6,6 +6,16 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Added
 
+- Performance: a 3-sheet × 100,000-row workbook (3M cells) opens in about 2.6 s in the browser instead of hanging; autosave no longer freezes (edits are journaled to IndexedDB in milliseconds); faster `.xlsx` reading and writing (single-pass zero-allocation XML reader, shared strings, typed loading). See docs/PERFORMANCE.md.
+
+- Grid layout: row heights (drag the row border, double-click to autofit, Row Height / Column Width dialogs in Excel's units), automatic row height for wrapped text and bigger fonts, hide/unhide rows and columns, Merge & Center / Across / Cells / Unmerge (selection and arrow keys treat merged cells as one), Freeze Panes (at selection, top row, first column). All saved in .xlsx.
+
+- Cell formatting: font family and size boxes, increase/decrease font size, Borders menu with Excel's presets, line styles and colours, Wrap Text, top/middle/bottom alignment, Format Painter; Alt+Enter turns on Wrap Text. All saved in .xlsx (fonts, borders, alignment).
+
+- Home page in the style of the Microsoft 365 start page: app rail, Start new tiles (blank workbook; document and presentation marked coming soon), open or drag-and-drop .xlsx/.csv, and Recent files with search and app filters. Every workbook is autosaved separately in the browser (up to 20) and listed in Recent. Apps open at `#/sheets/<id>`, so Back and refresh work. The title bar now has a Home button instead of the app switcher.
+
+- Excel look and feel: green title bar with file name, save status and Quick Access (save, undo, redo); ribbon with Excel's tabs and labelled groups, icons, split buttons, tooltips and collapse (Ctrl+F1); formula bar with Name Box dropdown, ✕/✓ and fx (Insert Function dialog); Excel grid defaults (64px columns, 20px rows, Calibri 11, green selection); Excel-style sheet tabs, status bar (mode, statistics, zoom slider), menus and dialogs.
+
 - Sheets: canvas grid with virtual scrolling, formula bar, multiple sheets, status bar (sum/count/average).
 - Sheets: formula engine with incremental recalculation, cycle detection and 46 functions.
 - Sheets: open/save `.xlsx` and `.csv`; copy/paste as tab-separated text; undo/redo.

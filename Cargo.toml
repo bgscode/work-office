@@ -24,6 +24,7 @@ slides-engine = { path = "crates/slides-engine" }
 office-formats = { path = "crates/formats" }
 office-collab = { path = "crates/collab" }
 quick-xml = "0.42"
+rustc-hash = "2"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [profile.release]

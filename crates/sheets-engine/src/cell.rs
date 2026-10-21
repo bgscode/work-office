@@ -20,7 +20,10 @@ impl CellRef {
 
     /// Parse an A1-style reference. `$` markers (`$B$12`) are accepted and ignored.
     pub fn parse(s: &str) -> Option<Self> {
-        let s: String = s.chars().filter(|&c| c != '$').collect();
+        if s.contains('$') {
+            let plain: String = s.chars().filter(|&c| c != '$').collect();
+            return Self::parse(&plain);
+        }
         let split = s.find(|c: char| c.is_ascii_digit())?;
         let (letters, digits) = s.split_at(split);
         let col = parse_col(letters)?;
