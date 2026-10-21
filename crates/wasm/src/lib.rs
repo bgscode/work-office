@@ -22,6 +22,8 @@ use sheets_engine::ops::{
 use sheets_engine::{Align, CellRef, FindOptions, NumberFormat, Range, Sheet, Style, StylePatch, Value, Workbook};
 use wasm_bindgen::prelude::*;
 
+mod layout;
+
 fn local_now_ms() -> f64 {
     let d = js_sys::Date::new_0();
     d.get_time() - d.get_timezone_offset() * 60_000.0
@@ -36,6 +38,8 @@ struct Clip {
     /// Computed values as inputs, for "paste values".
     values: Vec<String>,
     styles: Vec<Style>,
+    /// Merged areas inside the copied rectangle, relative to `origin`.
+    merges: Vec<Range>,
 }
 
 /// An open spreadsheet document plus its undo history.
@@ -383,6 +387,7 @@ impl SheetsDocument {
             inputs: r.cells().map(|at| s.input(at).to_string()).collect(),
             values: r.cells().map(|at| s.value(at).to_input()).collect(),
             styles: r.cells().map(|at| s.style(at).clone()).collect(),
+            merges: layout::copied_merges(s.layout().merges(), r),
         };
         let display = r.cells().map(|at| s.display(at)).collect();
         self.clip = Some(clip);
@@ -419,7 +424,18 @@ impl SheetsDocument {
                 }
             }
         }
-        self.apply(Batch(vec![Box::new(SetCells { sheet, edits }), Box::new(SetStyles { sheet, styles })]));
+        let mut ops: Vec<Box<dyn Op<Workbook>>> =
+            vec![Box::new(SetCells { sheet, edits }), Box::new(SetStyles { sheet, styles })];
+        if mode == "all" || mode == "formats" {
+            // Merged cells come along with the formatting, as in Excel.
+            let existing = self.sheet(sheet).layout().merges();
+            let at = CellRef::new(row, col);
+            let merges = layout::pasted_merges(existing, &clip.merges, at, (out_rows, out_cols), transpose);
+            if merges != existing {
+                ops.push(Box::new(sheets_engine::layout::SetMerges { sheet, merges }));
+            }
+        }
+        self.apply(Batch(ops));
         vec![out_rows, out_cols]
     }
 

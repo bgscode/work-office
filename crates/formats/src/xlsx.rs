@@ -14,8 +14,9 @@
 //!
 //! Supported today: values (numbers, text, booleans, errors), formulas, cell
 //! formatting (bold/italic/underline/strike, text and fill colours, horizontal
-//! alignment, number formats) and column widths.
-//! Not yet: merged cells, borders, fonts/sizes, row heights, charts.
+//! alignment, number formats), column widths, and the sheet layout in
+//! `xlsx_layout.rs` (row heights, hidden rows/columns, merged cells, frozen panes).
+//! Not yet: borders, fonts/sizes, charts.
 //! Excel "shared formulas" are imported as their cached values for every cell
 //! except the first, because we don't yet rewrite references when copying formulas.
 
@@ -29,6 +30,9 @@ use quick_xml::{Reader, XmlVersion};
 use sheets_engine::{Align, CellRef, ErrorKind, NumberFormat, Sheet, Style, Value, Workbook};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
+
+#[path = "xlsx_layout.rs"]
+mod layout;
 
 const NS_MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const NS_REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -108,6 +112,7 @@ pub fn read(bytes: &[u8]) -> Result<Workbook> {
             sheet.set_col_width(col, Some(width));
         }
         sheet.set_inputs(data.cells);
+        *sheet.layout_mut() = layout::read(&xml);
         book.push_sheet(name, sheet);
     }
     if book.sheets.is_empty() {
@@ -600,16 +605,11 @@ fn position_or_push<T: PartialEq>(list: &mut Vec<T>, item: T) -> usize {
 
 fn worksheet_xml(sheet: &Sheet, styles: &mut StyleTable) -> String {
     let mut xml = format!(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="{NS_MAIN}">"#);
-    let widths: Vec<(u32, f64)> = sheet.col_widths().collect();
-    if !widths.is_empty() {
-        xml.push_str("<cols>");
-        for (col, px) in widths {
-            let c = col + 1;
-            xml.push_str(&format!(r#"<col min="{c}" max="{c}" width="{}" customWidth="1"/>"#, px_to_chars(px)));
-        }
-        xml.push_str("</cols>");
-    }
+    xml.push_str(&layout::sheet_views_xml(sheet));
+    xml.push_str(&layout::sheet_format_xml(sheet));
+    xml.push_str(&layout::cols_xml(sheet));
     xml.push_str("<sheetData>");
+    let mut rows = layout::RowWriter::new(sheet);
     // Cells with content plus formatted empty cells, row by row.
     let mut positions: Vec<CellRef> = sheet.cells().into_iter().map(|(at, _, _)| at).collect();
     positions.extend(sheet.styled_cells().into_iter().map(|(at, _)| at));
@@ -621,7 +621,8 @@ fn worksheet_xml(sheet: &Sheet, styles: &mut StyleTable) -> String {
             if current_row.is_some() {
                 xml.push_str("</row>");
             }
-            xml.push_str(&format!(r#"<row r="{}">"#, at.row + 1));
+            rows.before(at.row, &mut xml);
+            xml.push_str(&rows.open(at.row));
             current_row = Some(at.row);
         }
         let s = styles.index(sheet.style(at));
@@ -630,7 +631,10 @@ fn worksheet_xml(sheet: &Sheet, styles: &mut StyleTable) -> String {
     if current_row.is_some() {
         xml.push_str("</row>");
     }
-    xml.push_str("</sheetData></worksheet>");
+    rows.rest(&mut xml);
+    xml.push_str("</sheetData>");
+    xml.push_str(&layout::merge_cells_xml(sheet));
+    xml.push_str("</worksheet>");
     xml
 }
 
@@ -825,5 +829,52 @@ mod tests {
         assert_eq!(s.display(CellRef::new(2, 0)), "15-08-2025");
         assert!(s.style(CellRef::new(5, 5)).bold);
         assert_eq!(s.col_width(0), 180.0);
+    }
+
+    #[test]
+    fn round_trips_layout() {
+        use sheets_engine::layout::Freeze;
+        use sheets_engine::Range;
+        let mut book = Workbook::new();
+        let s = &mut book.sheets[0].sheet;
+        s.set_input(CellRef::new(3, 0), "tall");
+        s.set_col_width(2, Some(150.0));
+        let l = s.layout_mut();
+        l.set_row_height(3, 3, Some(40.0));
+        l.set_row_height(7, 8, Some(60.0));
+        l.hidden_rows.set(5, 5, Some(()));
+        l.hidden_cols.set(2, 4, Some(()));
+        l.set_merges([Range::new(CellRef::new(0, 0), CellRef::new(1, 2))]);
+        l.freeze = Some(Freeze { rows: 1, cols: 2 });
+        let bytes = write(&book).unwrap();
+        let sheet_xml = {
+            let mut zip = ZipArchive::new(Cursor::new(&bytes[..])).unwrap();
+            part(&mut zip, "xl/worksheets/sheet1.xml").unwrap().unwrap()
+        };
+        assert!(sheet_xml
+            .contains(r#"<pane xSplit="2" ySplit="1" topLeftCell="C2" activePane="bottomRight" state="frozen"/>"#));
+        assert!(sheet_xml.contains(r#"<row r="4" ht="30" customHeight="1">"#));
+        assert!(sheet_xml.contains(r#"<row r="6" hidden="1"/>"#));
+        assert!(sheet_xml.contains(r#"<mergeCells count="1"><mergeCell ref="A1:C2"/></mergeCells>"#));
+        assert!(sheet_xml.contains(r#"<col min="3" max="3" width="20.71" hidden="1" customWidth="1"/>"#));
+        assert!(sheet_xml.contains(r#"<col min="4" max="5" width="13.57" hidden="1"/>"#));
+
+        let back = read(&bytes).unwrap();
+        let s = &back.sheets[0].sheet;
+        assert_eq!(s.layout(), book.sheets[0].sheet.layout());
+        assert_eq!(s.col_width(2), 150.0);
+        assert_eq!(s.input(CellRef::new(3, 0)), "tall");
+    }
+
+    #[test]
+    fn hidden_tail_uses_zero_height() {
+        let mut book = Workbook::new();
+        let l = book.sheets[0].sheet.layout_mut();
+        l.hidden_rows.set(2, 2, Some(()));
+        l.hidden_rows.set(10, sheets_engine::MAX_ROWS - 1, Some(()));
+        let bytes = write(&book).unwrap();
+        assert!(bytes.len() < 10_000, "the hidden tail isn't written row by row");
+        let back = read(&bytes).unwrap();
+        assert_eq!(back.sheets[0].sheet.layout(), book.sheets[0].sheet.layout());
     }
 }

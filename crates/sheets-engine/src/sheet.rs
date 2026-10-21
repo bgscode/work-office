@@ -18,6 +18,7 @@ use crate::fill::{self, FillDirection};
 use crate::format;
 use crate::formula::refs::{self, Axis};
 use crate::formula::{self, CellSource, Expr};
+use crate::layout::SheetLayout;
 use crate::style::{NumberFormat, Style};
 use crate::value::{compare, Value};
 
@@ -92,7 +93,12 @@ pub struct Sheet {
     styles: HashMap<CellRef, Style>,
     /// Column index -> width in pixels, for columns that aren't the default width.
     col_widths: BTreeMap<u32, f64>,
+    /// Row heights, hidden rows/columns, merged cells, frozen panes (see `layout.rs`).
+    layout: SheetLayout,
 }
+
+/// Rows hidden by AutoFilter. Placeholder until filters exist; see `Sheet::filter_hidden_rows`.
+static NO_FILTER_HIDDEN_ROWS: crate::layout::LineSet = crate::layout::LineSet::new_const();
 
 static EMPTY: Value = Value::Empty;
 static DEFAULT_STYLE: Style = Style {
@@ -191,6 +197,29 @@ impl Sheet {
         self.col_widths.iter().map(|(c, w)| (*c, *w))
     }
 
+    pub fn layout(&self) -> &SheetLayout {
+        &self.layout
+    }
+
+    pub fn layout_mut(&mut self) -> &mut SheetLayout {
+        &mut self.layout
+    }
+
+    /// Rows hidden by an AutoFilter. Hook for the filter feature: empty until
+    /// filters exist. `is_row_hidden` and the UI's row layout already include it.
+    pub fn filter_hidden_rows(&self) -> &crate::layout::LineSet {
+        &NO_FILTER_HIDDEN_ROWS
+    }
+
+    /// The one notion of "row hidden": hidden by the user or by a filter.
+    pub fn is_row_hidden(&self, row: u32) -> bool {
+        self.layout.hidden_rows.contains(row) || self.filter_hidden_rows().contains(row)
+    }
+
+    pub fn is_col_hidden(&self, col: u32) -> bool {
+        self.layout.hidden_cols.contains(col)
+    }
+
     /// All non-empty cells, sorted row by row.
     pub fn cells(&self) -> Vec<(CellRef, &str, &Value)> {
         let mut out: Vec<_> = self.cells.keys().map(|&at| (at, self.input(at), self.value(at))).collect();
@@ -282,9 +311,20 @@ impl Sheet {
     /// the current block of data, or to the next filled cell, or to the sheet edge.
     pub fn jump(&self, from: CellRef, d_row: i32, d_col: i32) -> CellRef {
         let (rows, cols) = (MAX_ROWS as i64, MAX_COLS as i64);
+        // One cell in the direction of travel, skipping hidden rows and columns.
         let step = |c: CellRef| -> Option<CellRef> {
-            let (r, k) = (c.row as i64 + d_row as i64, c.col as i64 + d_col as i64);
-            (r >= 0 && k >= 0 && r < rows && k < cols).then(|| CellRef::new(r as u32, k as u32))
+            let (mut r, mut k) = (c.row as i64, c.col as i64);
+            loop {
+                (r, k) = (r + d_row as i64, k + d_col as i64);
+                if r < 0 || k < 0 || r >= rows || k >= cols {
+                    return None;
+                }
+                let hidden =
+                    (d_row != 0 && self.is_row_hidden(r as u32)) || (d_col != 0 && self.is_col_hidden(k as u32));
+                if !hidden {
+                    return Some(CellRef::new(r as u32, k as u32));
+                }
+            }
         };
         let filled = |c: CellRef| self.cells.contains_key(&c);
         let Some(next) = step(from) else { return from };
@@ -332,12 +372,17 @@ impl Sheet {
 
     /// A copy with `count` rows or columns inserted before index `at`.
     pub fn with_inserted(&self, axis: Axis, at: u32, count: u32) -> Sheet {
-        self.remapped(axis, &refs::insert_map(at, count))
+        let mut out = self.remapped(axis, &refs::insert_map(at, count));
+        let limit = if axis == Axis::Row { MAX_ROWS } else { MAX_COLS };
+        out.layout = self.layout.inserted(axis == Axis::Row, at, count, limit);
+        out
     }
 
     /// A copy with `count` rows or columns deleted starting at index `at`.
     pub fn with_deleted(&self, axis: Axis, at: u32, count: u32) -> Sheet {
-        self.remapped(axis, &refs::delete_map(at, count))
+        let mut out = self.remapped(axis, &refs::delete_map(at, count));
+        out.layout = self.layout.deleted(axis == Axis::Row, at, count);
+        out
     }
 
     fn remapped(&self, axis: Axis, map: &dyn Fn(u32) -> Option<u32>) -> Sheet {
@@ -390,7 +435,7 @@ impl Sheet {
         }
         let in_range =
             |at: &CellRef| at.col >= range.start.col && at.col <= range.end.col && new_row_of.contains_key(&at.row);
-        let mut out = Sheet { col_widths: self.col_widths.clone(), ..Sheet::new() };
+        let mut out = Sheet { col_widths: self.col_widths.clone(), layout: self.layout.clone(), ..Sheet::new() };
         for (at, style) in &self.styles {
             let to = if in_range(at) { CellRef::new(new_row_of[&at.row], at.col) } else { *at };
             out.styles.insert(to, style.clone());

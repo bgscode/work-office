@@ -18,6 +18,7 @@ pub mod fill;
 pub mod format;
 pub mod formula;
 pub mod functions;
+pub mod layout;
 pub mod ops;
 pub mod sheet;
 pub mod style;
