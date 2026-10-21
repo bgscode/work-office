@@ -25,8 +25,10 @@ use sheets_engine::{Align, CellRef, FindOptions, NumberFormat, Range, Sheet, Sty
 use sheets_engine::{BorderLine, BorderStyle, Side, VAlign};
 use wasm_bindgen::prelude::*;
 
+mod data_tools;
 mod layout;
 
+#[cfg(target_arch = "wasm32")]
 fn local_now_ms() -> f64 {
     let d = js_sys::Date::new_0();
     d.get_time() - d.get_timezone_offset() * 60_000.0
@@ -63,6 +65,8 @@ impl Default for SheetsDocument {
 
 impl SheetsDocument {
     fn from_book(book: Workbook) -> SheetsDocument {
+        // Native builds (tests) keep the engine's system clock.
+        #[cfg(target_arch = "wasm32")]
         sheets_engine::date::set_clock(local_now_ms);
         SheetsDocument { book, history: History::default(), clip: None, painter: None }
     }

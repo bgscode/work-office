@@ -163,7 +163,6 @@ pub struct Sheet {
     pub(crate) tools: crate::data_tools::DataTools,
 }
 
-
 static EMPTY: Value = Value::Empty;
 static DEFAULT_STYLE: Style = Style {
     bold: false,

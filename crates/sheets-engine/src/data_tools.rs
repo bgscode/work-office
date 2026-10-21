@@ -201,24 +201,29 @@ pub fn format_sqref(ranges: &[Range]) -> String {
 pub fn current_region(sheet: &Sheet, at: CellRef) -> Range {
     let filled =
         |r: u32, c: u32| !sheet.value(CellRef::new(r, c)).is_empty() || !sheet.input(CellRef::new(r, c)).is_empty();
+    // Nothing lies beyond the used extent, so scans stop there.
+    let (rows, cols) = sheet.extent();
+    let (last_row, last_col) = (rows.max(at.row + 1).min(MAX_ROWS) - 1, cols.max(at.col + 1).min(MAX_COLS) - 1);
     let (mut top, mut left, mut bottom, mut right) = (at.row, at.col, at.row, at.col);
+    // Each side grows as far as it can before the others are checked again, so
+    // a 100k-row table takes a few passes rather than one pass per row.
     loop {
         let mut grew = false;
-        let (lo_c, hi_c) = (left.saturating_sub(1), (right + 1).min(MAX_COLS - 1));
-        let (lo_r, hi_r) = (top.saturating_sub(1), (bottom + 1).min(MAX_ROWS - 1));
-        if top > 0 && (lo_c..=hi_c).any(|c| filled(top - 1, c)) {
+        let (lo_c, hi_c) = (left.saturating_sub(1), (right + 1).min(last_col));
+        while top > 0 && (lo_c..=hi_c).any(|c| filled(top - 1, c)) {
             top -= 1;
             grew = true;
         }
-        if bottom + 1 < MAX_ROWS && (lo_c..=hi_c).any(|c| filled(bottom + 1, c)) {
+        while bottom < last_row && (lo_c..=hi_c).any(|c| filled(bottom + 1, c)) {
             bottom += 1;
             grew = true;
         }
-        if left > 0 && (lo_r..=hi_r).any(|r| filled(r, left - 1)) {
+        let (lo_r, hi_r) = (top.saturating_sub(1), (bottom + 1).min(last_row));
+        while left > 0 && (lo_r..=hi_r).any(|r| filled(r, left - 1)) {
             left -= 1;
             grew = true;
         }
-        if right + 1 < MAX_COLS && (lo_r..=hi_r).any(|r| filled(r, right + 1)) {
+        while right < last_col && (lo_r..=hi_r).any(|r| filled(r, right + 1)) {
             right += 1;
             grew = true;
         }

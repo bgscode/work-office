@@ -103,7 +103,8 @@ impl ToolsReader {
             }
             XmlEvent::Start { name: "filters", attrs } => {
                 if let Some((_, slot, _)) = column {
-                    *slot = Some(ColumnFilter::Values { values: Default::default(), blanks: attr(attrs, "blank") == "1" });
+                    *slot =
+                        Some(ColumnFilter::Values { values: Default::default(), blanks: attr(attrs, "blank") == "1" });
                 }
             }
             XmlEvent::Start { name: "filter", attrs } => {
@@ -187,11 +188,23 @@ impl ToolsReader {
                 self.cf_ranges = parse_sqref(&attr(attrs, "sqref"))
             }
             XmlEvent::Start { name: "cfRule", attrs } => {
-                let attrs = ["type", "operator", "text", "timePeriod", "bottom", "percent", "rank", "aboveAverage",
-                    "equalAverage", "dxfId", "stopIfTrue", "priority"]
-                    .iter()
-                    .filter_map(|k| attrs.get(k).map(|v| (k.to_string(), v.into_owned())))
-                    .collect();
+                let attrs = [
+                    "type",
+                    "operator",
+                    "text",
+                    "timePeriod",
+                    "bottom",
+                    "percent",
+                    "rank",
+                    "aboveAverage",
+                    "equalAverage",
+                    "dxfId",
+                    "stopIfTrue",
+                    "priority",
+                ]
+                .iter()
+                .filter_map(|k| attrs.get(k).map(|v| (k.to_string(), v.into_owned())))
+                .collect();
                 *rule = Some(RuleDraft { attrs, formulas: Vec::new(), cfvos: Vec::new(), colors: Vec::new() });
             }
             XmlEvent::Start { name: "formula", .. } if rule.is_some() => {
