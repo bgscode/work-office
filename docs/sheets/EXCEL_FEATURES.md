@@ -58,14 +58,14 @@ When you finish an item, update its row in the same pull request.
 | Horizontal alignment | ✅ | P1 | – |
 | Number formats: number, ₹/$ currency, %, date, time, text; decimals ± | ✅ | P1 | – |
 | Column width: drag, autofit | ✅ | P1 | – |
-| Font family and font size | ⬜ | P1 | M2 |
-| Borders (all, outer, bottom, thick, colours) | ⬜ | P1 | M2 |
+| Font family and font size (incl. Hindi fonts Mangal / Nirmala UI), increase/decrease size | ✅ | P1 | M2 |
+| Borders (Excel's presets, line styles, line colours) | ✅ | P1 | M2 |
 | Merge & centre / unmerge | ⬜ | P1 | M2 |
-| Wrap text (cells with Alt+Enter line breaks show on one line until then) | ⬜ | P1 | M2 |
-| Vertical alignment (top / middle / bottom) | ⬜ | P1 | M2 |
+| Wrap text (drawn in the cell; rows don't grow to fit yet — comes with row heights) | 🟡 | P1 | M2 |
+| Vertical alignment (top / middle / bottom) | ✅ | P1 | M2 |
 | Row height: drag, autofit | ⬜ | P1 | M2 |
 | Hide / unhide rows and columns | ⬜ | P1 | M2 |
-| Format Painter | ⬜ | P1 | M2 |
+| Format Painter (click once, double-click to keep painting, Esc to stop) | ✅ | P1 | M2 |
 | Conditional formatting: highlight rules (>, <, between, equal, text contains, duplicates) | ⬜ | P1 | M4 |
 | Conditional formatting: colour scales, data bars, icon sets | ⬜ | P2 | – |
 | Format as Table (banded rows, header style) | ⬜ | P2 | – |

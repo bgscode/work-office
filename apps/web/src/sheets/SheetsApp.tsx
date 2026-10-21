@@ -27,6 +27,7 @@ import {
   type Rect,
   type Selection,
 } from "./geometry";
+import { alignmentCommands, bordersCommand, fontCommands, painterCommand, type BorderLineChoice, type FormattingContext, type PainterMode } from "./features/formatting";
 import { Grid, fillArea, type FillDirection, type GridShortcut } from "./Grid";
 import { fontFor } from "./paint";
 import { NameBox } from "./NameBox";
@@ -183,7 +184,9 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
     if (!editing) return;
     const value = closeParens(editing.draft);
     if (value !== doc.input(sheet, row, col)) {
-      doc.setInputs(sheet, Uint32Array.of(row), Uint32Array.of(col), [value]);
+      // A line break (Alt+Enter) turns on Wrap Text in the same undo step, like Excel.
+      if (value.includes("\n") && !activeStyle.wrap) doc.setInputWrapped(sheet, row, col, value);
+      else doc.setInputs(sheet, Uint32Array.of(row), Uint32Array.of(col), [value]);
       widenForNumber(row, col);
       changed();
     }
@@ -414,6 +417,59 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
   }
 
   const toggle = (key: "bold" | "italic" | "underline" | "strike", on: boolean | undefined) => format(key, on ? "0" : "1");
+
+  // ---- borders and Format Painter
+
+  const [borderLine, setBorderLine] = useState<BorderLineChoice>({ style: "thin", color: "" });
+  const [lastBorder, setLastBorder] = useState("bottom");
+  const [painter, setPainterMode] = useState<PainterMode>("off");
+
+  function applyBorders(preset: string) {
+    let r: Rect | null = sel;
+    if ((r.bottom - r.top + 1) * (r.right - r.left + 1) > MAX_FORMAT_CELLS) r = dataRect();
+    if (!r) return;
+    doc.applyBorders(sheet, r.top, r.left, r.bottom, r.right, preset, borderLine.style, borderLine.color);
+    setLastBorder(preset);
+    changed();
+  }
+
+  function setPainter(mode: PainterMode) {
+    if (mode !== "off") doc.pickFormats(sheet, sel.top, sel.left, sel.bottom, sel.right);
+    setPainterMode(mode);
+  }
+
+  // While Format Painter is on, the next selection made in the grid receives the
+  // formatting when the mouse is released (Excel behaviour). Esc stops it.
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  useEffect(() => {
+    if (painter === "off") return;
+    const onUp = (e: MouseEvent) => {
+      if (!(e.target as Element | null)?.closest?.(".grid")) return;
+      const r = selectionRect(selectionRef.current);
+      if (doc.paintFormats(sheet, r.top, r.left, r.bottom, r.right).length) changed();
+      if (painter === "once") setPainterMode("off");
+    };
+    const onKey = (e: globalThis.KeyboardEvent) => e.key === "Escape" && setPainterMode("off");
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [painter, doc, sheet]);
+
+  const formatting: FormattingContext = {
+    style: activeStyle,
+    format,
+    applyBorders,
+    borderLine,
+    setBorderLine,
+    lastBorder,
+    painter,
+    setPainter,
+    focusGrid: () => cellInputRef.current?.focus({ preventScroll: true }),
+  };
 
   // ---- fill handle
 
@@ -757,6 +813,7 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
         },
         { id: "cut", label: "Cut", shortcut: `${MOD_KEY}X`, icon: "cut", size: "small", group: "Clipboard", onRun: () => navigator.clipboard?.writeText(cut()) },
         { id: "copy", label: "Copy", shortcut: `${MOD_KEY}C`, icon: "copy", size: "small", group: "Clipboard", onRun: () => navigator.clipboard?.writeText(copy()) },
+        painterCommand(formatting),
         {
           id: "paste-special",
           label: "Paste special",
@@ -786,16 +843,17 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
             </label>
           ),
         },
-        { id: "bold", label: "Bold", shortcut: `${MOD_KEY}B`, title: "Make your text bold.", icon: "bold", group: "Font", active: !!activeStyle.b, onRun: () => toggle("bold", !!activeStyle.b) },
+        ...fontCommands(formatting),
+        { id: "bold", newRow: true, label: "Bold", shortcut: `${MOD_KEY}B`, title: "Make your text bold.", icon: "bold", group: "Font", active: !!activeStyle.b, onRun: () => toggle("bold", !!activeStyle.b) },
         { id: "italic", label: "Italic", shortcut: `${MOD_KEY}I`, title: "Italicize your text.", icon: "italic", group: "Font", active: !!activeStyle.i, onRun: () => toggle("italic", !!activeStyle.i) },
         { id: "underline", label: "Underline", shortcut: `${MOD_KEY}U`, title: "Underline your text.", icon: "underline", group: "Font", active: !!activeStyle.u, onRun: () => toggle("underline", !!activeStyle.u) },
         { id: "strike", label: "Strikethrough", title: "Cross out text by drawing a line through it.", icon: "strike", group: "Font", active: !!activeStyle.s, onRun: () => toggle("strike", !!activeStyle.s) },
+        bordersCommand(formatting),
         {
           id: "fill",
           label: "Fill Color",
           title: "Color the background of cells to make them stand out.",
           group: "Font",
-          newRow: true,
           render: () => <ColorPicker label="▧" icon="fillColor" title="Fill colour" value={activeStyle.fill ?? "#ffffff"} onPick={(c) => format("fill", c)} />,
         },
         {
@@ -805,7 +863,8 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
           group: "Font",
           render: () => <ColorPicker label="A" icon="fontColor" title="Text colour" value={activeStyle.color ?? "#1f1f1f"} onPick={(c) => format("color", c)} />,
         },
-        { id: "align-left", label: "Align Left", title: "Align your content to the left.", icon: "alignLeft", group: "Alignment", active: activeStyle.align === "left", onRun: () => format("align", "left") },
+        ...alignmentCommands(formatting),
+        { id: "align-left", newRow: true, label: "Align Left", title: "Align your content to the left.", icon: "alignLeft", group: "Alignment", active: activeStyle.align === "left", onRun: () => format("align", "left") },
         { id: "align-center", label: "Center", title: "Center your content.", icon: "alignCenter", group: "Alignment", active: activeStyle.align === "center", onRun: () => format("align", "center") },
         { id: "align-right", label: "Align Right", title: "Align your content to the right.", icon: "alignRight", group: "Alignment", active: activeStyle.align === "right", onRun: () => format("align", "right") },
         {
@@ -1007,7 +1066,7 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
         onCancel={() => setEditing(null)}
         onInsertFunction={openInsertFunction}
       />
-      <div className="grid-area">
+      <div className={painter === "off" ? "grid-area" : "grid-area painting"}>
         <Grid
           doc={doc}
           sheet={sheet}

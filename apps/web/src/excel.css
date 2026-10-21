@@ -1077,3 +1077,124 @@ textarea.cell-editor {
   border-color: var(--xl-border-strong);
   font-family: "Segoe UI", system-ui, sans-serif;
 }
+
+/* ---------------------------------------------------------------- cell formatting controls */
+
+.font-step {
+  font: 600 14px "Segoe UI", system-ui, sans-serif;
+  line-height: 1;
+}
+
+.font-step.small {
+  font-size: 11px;
+}
+
+.font-step sup {
+  font-size: 7px;
+  vertical-align: top;
+}
+
+.color-chip {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.ribbon-button.painter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  padding: 2px 5px;
+  min-height: 24px;
+  font-size: 12px;
+  color: var(--xl-text);
+}
+
+.ribbon-button.painter:hover {
+  background: var(--xl-hover);
+}
+
+.ribbon-button.painter.pressed {
+  background: #d2d0ce;
+  border-color: #b3b0ad;
+}
+
+/* Format Painter active: paintbrush-style cursor over the grid. */
+.grid-area.painting .grid-scroller {
+  cursor: copy !important;
+}
+
+/* Font / Font Size boxes (sheets/features/ComboBox.tsx) */
+.fmt-combo {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  height: 24px;
+  border: 1px solid var(--xl-border-strong);
+  background: #fff;
+}
+
+.fmt-combo:hover,
+.fmt-combo:focus-within {
+  border-color: #8a8886;
+}
+
+.fmt-combo input {
+  min-width: 0;
+  padding: 0 4px;
+  border: 0;
+  outline: none;
+  font: 12px "Segoe UI", system-ui, sans-serif;
+  color: var(--xl-text);
+}
+
+.fmt-combo-arrow {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid transparent;
+  background: none;
+  color: var(--xl-muted);
+}
+
+.fmt-combo-arrow:hover {
+  background: var(--xl-hover);
+}
+
+.fmt-combo-list {
+  position: absolute;
+  z-index: 45;
+  top: 100%;
+  left: -1px;
+  min-width: calc(100% + 2px);
+  max-height: 280px;
+  margin: 0;
+  padding: 2px 0;
+  overflow-y: auto;
+  list-style: none;
+  background: #fff;
+  border: 1px solid var(--xl-border-strong);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+}
+
+.fmt-combo-list li {
+  padding: 3px 10px;
+  white-space: nowrap;
+  font-size: 13px;
+  cursor: default;
+}
+
+.fmt-combo-list li.current {
+  background: #e1dfdd;
+}
+
+.fmt-combo-list li.active,
+.fmt-combo-list li:hover {
+  background: #cfe4d6;
+}
