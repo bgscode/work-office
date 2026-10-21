@@ -8,7 +8,7 @@
 
 import { MAX_COLS, MAX_ROWS, ROW_HEIGHT } from "./geometry";
 
-export const DEFAULT_COL_WIDTH = 100;
+export const DEFAULT_COL_WIDTH = 64;
 export const DEFAULT_ROW_HEIGHT = ROW_HEIGHT;
 
 /** [first, last, size] inclusive run of lines. */

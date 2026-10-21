@@ -32,6 +32,44 @@ export interface CellStyle {
   fill?: string;
   align?: "left" | "center" | "right";
   fmt?: NumberFormatKind;
+  /** Font family; absent = the default (Calibri). */
+  font?: string;
+  /** Font size in points; absent = 11. */
+  sz?: number;
+  /** Wrap Text. */
+  wrap?: 1;
+  /** Vertical alignment; absent = bottom (Excel's default). */
+  va?: "top" | "center";
+  border?: CellBorders;
+}
+
+/** `.xlsx` border style names, as used by `applyBorders`. */
+export type BorderStyleName =
+  | "thin"
+  | "medium"
+  | "thick"
+  | "dashed"
+  | "dotted"
+  | "double"
+  | "hair"
+  | "mediumDashed"
+  | "dashDot"
+  | "mediumDashDot"
+  | "dashDotDot"
+  | "mediumDashDotDot"
+  | "slantDashDot";
+
+export interface BorderLine {
+  style: BorderStyleName;
+  /** `#RRGGBB`; absent = automatic (black). */
+  color?: string;
+}
+
+export interface CellBorders {
+  top?: BorderLine;
+  right?: BorderLine;
+  bottom?: BorderLine;
+  left?: BorderLine;
 }
 
 const EMPTY_STYLE: CellStyle = Object.freeze({});

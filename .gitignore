@@ -7,3 +7,6 @@ pkg/
 
 # wasm-pack output
 packages/engine/pkg/
+
+# Claude Code local data (agent worktrees)
+.claude/

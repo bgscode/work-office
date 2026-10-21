@@ -13,10 +13,11 @@
 //! ```
 //!
 //! Supported today: values (numbers, text, booleans, errors), formulas, cell
-//! formatting (bold/italic/underline/strike, text and fill colours, horizontal
-//! alignment, number formats), column widths, and the sheet layout in
-//! `xlsx_layout.rs` (row heights, hidden rows/columns, merged cells, frozen panes).
-//! Not yet: borders, fonts/sizes, charts.
+//! formatting (font name and size, bold/italic/underline/strike, text and fill
+//! colours, borders, horizontal and vertical alignment, wrap text, number
+//! formats), column widths, and the sheet layout in `xlsx_layout.rs` (row
+//! heights, hidden rows/columns, merged cells, frozen panes).
+//! Not yet: charts, theme/indexed colours (read as automatic).
 //! Excel "shared formulas" are imported as their cached values for every cell
 //! except the first, because we don't yet rewrite references when copying formulas.
 
@@ -27,7 +28,8 @@ use office_core::{OfficeError, Result};
 use quick_xml::escape::resolve_predefined_entity;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
-use sheets_engine::{Align, CellRef, ErrorKind, NumberFormat, Sheet, Style, Value, Workbook};
+use sheets_engine::{Align, CellRef, ErrorKind, NumberFormat, Sheet, Style, VAlign, Value, Workbook};
+use sheets_engine::{BorderLine, BorderStyle, Borders, Side};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -279,13 +281,19 @@ fn sheet_data(xml: &str, shared: &[String]) -> SheetData {
     out
 }
 
-/// Excel column width (in characters of the default font) to pixels, and back.
+/// Maximum digit width of Calibri 11 (Excel's default font) in pixels.
+const MAX_DIGIT_WIDTH: f64 = 7.0;
+
+/// `<col width>` to pixels. The stored width already includes Excel's 5px
+/// cell padding (ECMA-376 §18.3.1.13), so Excel's default 8.43-character
+/// column is stored as 9.140625 and is 64px wide.
 fn chars_to_px(width: f64) -> f64 {
-    (width * 7.0 + 5.0).round()
+    ((256.0 * width + (128.0 / MAX_DIGIT_WIDTH).trunc()) / 256.0 * MAX_DIGIT_WIDTH).trunc()
 }
 
+/// Pixels to `<col width>`, the inverse of `chars_to_px` for whole pixels.
 fn px_to_chars(px: f64) -> f64 {
-    ((px - 5.0) / 7.0 * 100.0).round() / 100.0
+    (px / MAX_DIGIT_WIDTH * 256.0).trunc() / 256.0
 }
 
 /// Built-in number format codes that files reference by id without defining them.
@@ -329,10 +337,13 @@ fn read_styles(xml: &str) -> Vec<Style> {
         underline: bool,
         strike: bool,
         color: Option<String>,
+        name: Option<String>,
+        size: Option<u16>,
     }
     let mut num_fmts: HashMap<u32, String> = HashMap::new();
     let mut fonts: Vec<Font> = Vec::new();
     let mut fills: Vec<Option<String>> = Vec::new();
+    let mut borders = BorderReader::default();
     let mut out = Vec::new();
     let (mut in_font, mut in_fill, mut in_cell_xfs) = (false, false, false);
     let mut pattern_solid = false;
@@ -356,9 +367,12 @@ fn read_styles(xml: &str) -> Vec<Style> {
                 "strike" => font.strike = on,
                 "u" => font.underline = attr(attrs, "val") != "none",
                 "color" => font.color = argb(attr(attrs, "rgb")),
+                "name" => font.name = Some(attr(attrs, "val").to_string()),
+                "sz" => font.size = attr(attrs, "val").parse::<f64>().ok().map(|pt| (pt * 10.0).round() as u16),
                 _ => {}
             }
         }
+        XmlEvent::Start { .. } | XmlEvent::End { .. } if borders.read(ev) => {}
         XmlEvent::Start { name: "fill", .. } => {
             in_fill = true;
             pattern_solid = false;
@@ -376,6 +390,7 @@ fn read_styles(xml: &str) -> Vec<Style> {
         XmlEvent::Start { name: "xf", attrs } if in_cell_xfs => {
             let index = |key: &str| attr(attrs, key).parse::<usize>().unwrap_or(0);
             let font = fonts.get(index("fontId")).cloned().unwrap_or_default();
+            let font_size = font.size.filter(|t| *t != sheets_engine::style::DEFAULT_FONT_SIZE);
             let fmt_id = index("numFmtId") as u32;
             let code =
                 num_fmts.get(&fmt_id).map(String::as_str).or_else(|| builtin_format(fmt_id)).unwrap_or("General");
@@ -388,6 +403,11 @@ fn read_styles(xml: &str) -> Vec<Style> {
                 fill: fills.get(index("fillId")).cloned().flatten(),
                 align: None,
                 number_format: NumberFormat::from_code(code),
+                font: font.name.filter(|n| !n.is_empty() && n != sheets_engine::style::DEFAULT_FONT),
+                font_size: font_size.map(|t| t.clamp(10, 4090)),
+                wrap: false,
+                valign: VAlign::Bottom,
+                borders: borders.list.get(index("borderId")).cloned().unwrap_or_default(),
             });
         }
         XmlEvent::Start { name: "alignment", attrs } if in_cell_xfs => {
@@ -398,11 +418,79 @@ fn read_styles(xml: &str) -> Vec<Style> {
                     "right" => Some(Align::Right),
                     _ => None,
                 };
+                style.wrap = matches!(attr(attrs, "wrapText"), "1" | "true");
+                style.valign = match attr(attrs, "vertical") {
+                    "top" | "justify" => VAlign::Top,
+                    "center" | "distributed" => VAlign::Center,
+                    _ => VAlign::Bottom,
+                };
             }
         }
         _ => {}
     });
     out
+}
+
+/// Reads the `<borders>` list of `styles.xml`, one `Borders` per `<border>`.
+#[derive(Default)]
+struct BorderReader {
+    list: Vec<Borders>,
+    in_border: bool,
+    side: Option<Side>,
+}
+
+impl BorderReader {
+    /// Consumes events inside `<border>`; returns false for everything else.
+    fn read(&mut self, ev: &XmlEvent) -> bool {
+        match ev {
+            XmlEvent::Start { name: "border", .. } => {
+                self.in_border = true;
+                self.list.push(Borders::default());
+            }
+            XmlEvent::End { name: "border" } => self.in_border = false,
+            _ if !self.in_border => return false,
+            XmlEvent::Start { name, attrs } => {
+                let side = match *name {
+                    "left" | "start" => Some(Side::Left),
+                    "right" | "end" => Some(Side::Right),
+                    "top" => Some(Side::Top),
+                    "bottom" => Some(Side::Bottom),
+                    _ => None,
+                };
+                if let Some(side) = side {
+                    self.side = Some(side);
+                    let line = BorderStyle::from_name(attr(attrs, "style")).map(|s| BorderLine::new(s, None));
+                    *self.list.last_mut().unwrap().side_mut(side) = line;
+                } else if let (Some(side), "color") = (self.side, *name) {
+                    if let Some(line) = self.list.last_mut().unwrap().side_mut(side) {
+                        line.color = argb(attr(attrs, "rgb")).filter(|c| c != "#000000");
+                    }
+                }
+            }
+            XmlEvent::End { name: "left" | "start" | "right" | "end" | "top" | "bottom" } => self.side = None,
+            _ => {}
+        }
+        true
+    }
+}
+
+/// `<border>` element for `styles.xml`, sides in the schema's order.
+fn border_xml(b: &Borders) -> String {
+    let mut xml = String::from("<border>");
+    for (tag, side) in [("left", Side::Left), ("right", Side::Right), ("top", Side::Top), ("bottom", Side::Bottom)] {
+        match b.side(side) {
+            None => xml.push_str(&format!("<{tag}/>")),
+            Some(line) => {
+                let color = match &line.color {
+                    Some(c) => format!(r#"<color rgb="FF{}"/>"#, c.trim_start_matches('#')),
+                    None => r#"<color indexed="64"/>"#.to_string(),
+                };
+                xml.push_str(&format!(r#"<{tag} style="{}">{color}</{tag}>"#, line.style.name()));
+            }
+        }
+    }
+    xml.push_str("<diagonal/></border>");
+    xml
 }
 
 /// "FFRRGGBB" (or "RRGGBB") -> "#RRGGBB".
@@ -486,13 +574,18 @@ pub fn write(book: &Workbook) -> Result<Vec<u8>> {
     Ok(zip.finish().map_err(|e| OfficeError::Io(e.to_string()))?.into_inner())
 }
 
+/// (bold, italic, underline, strike, colour, name, size in tenths of a point).
+type FontKey = (bool, bool, bool, bool, Option<String>, Option<String>, Option<u16>);
+
 /// Collects the distinct styles used while writing sheets, then emits
 /// `styles.xml`. Index 0 of every list is Excel's required default entry.
 #[derive(Default)]
 struct StyleTable {
     xfs: Vec<Style>,
-    fonts: Vec<(bool, bool, bool, bool, Option<String>)>,
+    fonts: Vec<FontKey>,
     fills: Vec<String>,
+    /// Non-empty borders; index 0 in the file is the empty border.
+    borders: Vec<Borders>,
     custom_formats: Vec<String>,
 }
 
@@ -514,20 +607,29 @@ impl StyleTable {
     fn finish_xml(&mut self) -> String {
         let mut cell_xfs = String::from(r#"<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>"#);
         for style in self.xfs.clone() {
-            let font_key = (style.bold, style.italic, style.underline, style.strike, style.color.clone());
+            let font_key = (
+                style.bold,
+                style.italic,
+                style.underline,
+                style.strike,
+                style.color.clone(),
+                style.font.clone(),
+                style.font_size,
+            );
             let font_id = 1 + position_or_push(&mut self.fonts, font_key);
             let fill_id = style.fill.clone().map_or(0, |f| 2 + position_or_push(&mut self.fills, f));
             let fmt_id = self.format_id(&style.number_format);
-            let align = match style.align {
-                Some(Align::Left) => r#"<alignment horizontal="left"/>"#,
-                Some(Align::Center) => r#"<alignment horizontal="center"/>"#,
-                Some(Align::Right) => r#"<alignment horizontal="right"/>"#,
-                None => "",
+            let border_id = if style.borders.is_empty() {
+                0
+            } else {
+                1 + position_or_push(&mut self.borders, style.borders.clone())
             };
+            let align = alignment_xml(&style);
             let apply_align = if align.is_empty() { "" } else { r#" applyAlignment="1""# };
+            let apply_border = if border_id == 0 { "" } else { r#" applyBorder="1""# };
             let inner_close = if align.is_empty() { "/>".to_string() } else { format!(">{align}</xf>") };
             cell_xfs.push_str(&format!(
-                r#"<xf numFmtId="{fmt_id}" fontId="{font_id}" fillId="{fill_id}" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"{apply_align}{inner_close}"#
+                r#"<xf numFmtId="{fmt_id}" fontId="{font_id}" fillId="{fill_id}" borderId="{border_id}" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"{apply_border}{apply_align}{inner_close}"#
             ));
         }
 
@@ -544,7 +646,7 @@ impl StyleTable {
             r#"<fonts count="{}"><font><sz val="11"/><name val="Calibri"/></font>"#,
             self.fonts.len() + 1
         ));
-        for (bold, italic, underline, strike, color) in &self.fonts {
+        for (bold, italic, underline, strike, color, name, size) in &self.fonts {
             xml.push_str("<font>");
             if *bold {
                 xml.push_str("<b/>");
@@ -558,11 +660,13 @@ impl StyleTable {
             if *underline {
                 xml.push_str("<u/>");
             }
-            xml.push_str(r#"<sz val="11"/>"#);
+            let pt = size.unwrap_or(sheets_engine::style::DEFAULT_FONT_SIZE) as f64 / 10.0;
+            xml.push_str(&format!(r#"<sz val="{pt}"/>"#));
             if let Some(c) = color {
                 xml.push_str(&format!(r#"<color rgb="FF{}"/>"#, c.trim_start_matches('#')));
             }
-            xml.push_str(r#"<name val="Calibri"/></font>"#);
+            let name = escape(name.as_deref().unwrap_or(sheets_engine::style::DEFAULT_FONT));
+            xml.push_str(&format!(r#"<name val="{name}"/><family val="2"/></font>"#));
         }
         xml.push_str("</fonts>");
         xml.push_str(&format!(
@@ -576,7 +680,12 @@ impl StyleTable {
             ));
         }
         xml.push_str("</fills>");
-        xml.push_str(r#"<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>"#);
+        xml.push_str(&format!(r#"<borders count="{}">"#, self.borders.len() + 1));
+        xml.push_str(&border_xml(&Borders::default()));
+        for b in &self.borders {
+            xml.push_str(&border_xml(b));
+        }
+        xml.push_str("</borders>");
         xml.push_str(r#"<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>"#);
         xml.push_str(&format!(r#"<cellXfs count="{}">{cell_xfs}</cellXfs>"#, self.xfs.len() + 1));
         xml.push_str(r#"<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>"#);
@@ -590,6 +699,30 @@ impl StyleTable {
             return id as usize;
         }
         164 + position_or_push(&mut self.custom_formats, code)
+    }
+}
+
+/// `<alignment>` for an `<xf>`, or "" when everything is default.
+fn alignment_xml(style: &Style) -> String {
+    let mut attrs = String::new();
+    match style.align {
+        Some(Align::Left) => attrs.push_str(r#" horizontal="left""#),
+        Some(Align::Center) => attrs.push_str(r#" horizontal="center""#),
+        Some(Align::Right) => attrs.push_str(r#" horizontal="right""#),
+        None => {}
+    }
+    match style.valign {
+        VAlign::Top => attrs.push_str(r#" vertical="top""#),
+        VAlign::Center => attrs.push_str(r#" vertical="center""#),
+        VAlign::Bottom => {}
+    }
+    if style.wrap {
+        attrs.push_str(r#" wrapText="1""#);
+    }
+    if attrs.is_empty() {
+        String::new()
+    } else {
+        format!("<alignment{attrs}/>")
     }
 }
 
@@ -813,6 +946,7 @@ mod tests {
             fill: Some("#FFF2CC".into()),
             align: Some(Align::Center),
             number_format: NumberFormat::Currency { symbol: "₹".into(), decimals: 2 },
+            ..Style::default()
         };
         s.set_style(CellRef::new(0, 0), fancy.clone());
         s.set_input(CellRef::new(0, 0), "1234.5");
@@ -856,8 +990,10 @@ mod tests {
         assert!(sheet_xml.contains(r#"<row r="4" ht="30" customHeight="1">"#));
         assert!(sheet_xml.contains(r#"<row r="6" hidden="1"/>"#));
         assert!(sheet_xml.contains(r#"<mergeCells count="1"><mergeCell ref="A1:C2"/></mergeCells>"#));
-        assert!(sheet_xml.contains(r#"<col min="3" max="3" width="20.71" hidden="1" customWidth="1"/>"#));
-        assert!(sheet_xml.contains(r#"<col min="4" max="5" width="13.57" hidden="1"/>"#));
+        let custom = px_to_chars(150.0);
+        let default = px_to_chars(sheets_engine::sheet::DEFAULT_COL_WIDTH);
+        assert!(sheet_xml.contains(&format!(r#"<col min="3" max="3" width="{custom}" hidden="1" customWidth="1"/>"#)), "{sheet_xml}");
+        assert!(sheet_xml.contains(&format!(r#"<col min="4" max="5" width="{default}" hidden="1"/>"#)), "{sheet_xml}");
 
         let back = read(&bytes).unwrap();
         let s = &back.sheets[0].sheet;
@@ -876,5 +1012,107 @@ mod tests {
         assert!(bytes.len() < 10_000, "the hidden tail isn't written row by row");
         let back = read(&bytes).unwrap();
         assert_eq!(back.sheets[0].sheet.layout(), book.sheets[0].sheet.layout());
+    }
+
+    #[test]
+    fn round_trips_fonts_borders_and_alignment() {
+        let mut book = Workbook::new();
+        let s = &mut book.sheets[0].sheet;
+        let red_thick = BorderLine::new(BorderStyle::Thick, Some("#FF0000".into()));
+        let styled = Style {
+            font: Some("Times New Roman".into()),
+            font_size: Some(105),
+            wrap: true,
+            valign: VAlign::Top,
+            align: Some(Align::Center),
+            borders: Borders {
+                top: Some(BorderLine::new(BorderStyle::Thin, None)),
+                right: Some(BorderLine::new(BorderStyle::Dashed, None)),
+                bottom: Some(BorderLine::new(BorderStyle::Double, Some("#0070C0".into()))),
+                left: Some(red_thick.clone()),
+            },
+            ..Style::default()
+        };
+        s.set_style(CellRef::new(0, 0), styled.clone());
+        s.set_input(CellRef::new(0, 0), "line one\nline two");
+        let mangal =
+            Style { font: Some("Mangal".into()), font_size: Some(240), valign: VAlign::Center, ..Style::default() };
+        s.set_style(CellRef::new(1, 0), mangal.clone());
+        s.set_input(CellRef::new(1, 0), "नमस्ते");
+        let dotted = Style {
+            borders: Borders { bottom: Some(BorderLine::new(BorderStyle::Dotted, None)), ..Borders::default() },
+            ..Style::default()
+        };
+        s.set_style(CellRef::new(2, 2), dotted.clone());
+
+        let bytes = write(&book).unwrap();
+        let back = read(&bytes).unwrap();
+        let s = &back.sheets[0].sheet;
+        assert_eq!(s.style(CellRef::new(0, 0)), &styled);
+        assert_eq!(s.input(CellRef::new(0, 0)), "line one\nline two");
+        assert_eq!(s.style(CellRef::new(1, 0)), &mangal);
+        assert_eq!(s.style(CellRef::new(2, 2)), &dotted);
+        assert!(s.style(CellRef::new(3, 3)).is_default());
+
+        // The XML has Excel's structure.
+        let mut zip = ZipArchive::new(Cursor::new(bytes.as_slice())).unwrap();
+        let styles = part(&mut zip, "xl/styles.xml").unwrap().unwrap();
+        assert!(styles.contains(r#"<sz val="10.5"/>"#), "{styles}");
+        assert!(styles.contains(r#"<name val="Times New Roman"/>"#));
+        assert!(styles.contains(r#"<borders count="3"><border><left/><right/><top/><bottom/><diagonal/></border>"#));
+        assert!(styles.contains(r#"<left style="thick"><color rgb="FFFF0000"/></left>"#));
+        assert!(styles.contains(r#"<top style="thin"><color indexed="64"/></top>"#));
+        assert!(styles.contains(r#"<alignment horizontal="center" vertical="top" wrapText="1"/>"#));
+        assert!(styles.contains(r#"applyBorder="1""#));
+    }
+
+    #[test]
+    fn reads_excel_styles_xml() {
+        // Trimmed from a workbook saved by Excel for Microsoft 365.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="3"><font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>
+<font><b/><sz val="14"/><color rgb="FFC00000"/><name val="Arial"/><family val="2"/></font>
+<font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font></fonts>
+<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>
+<border><left style="thin"><color indexed="64"/></left><right style="medium"><color rgb="FF00B050"/></right><top/><bottom style="double"><color auto="1"/></bottom><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/>
+<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment horizontal="left" vertical="top"/></xf></cellXfs>
+<dxfs count="1"><dxf><font><b/></font><border><left style="thick"/></border></dxf></dxfs>
+</styleSheet>"#;
+        let styles = read_styles(xml);
+        assert_eq!(styles.len(), 4);
+        assert!(styles[0].is_default());
+        let s = &styles[1];
+        assert!(s.bold);
+        assert_eq!(s.font.as_deref(), Some("Arial"));
+        assert_eq!(s.font_size, Some(140));
+        assert_eq!(s.color.as_deref(), Some("#C00000"));
+        assert_eq!(s.borders.left, Some(BorderLine::new(BorderStyle::Thin, None)));
+        assert_eq!(s.borders.right, Some(BorderLine::new(BorderStyle::Medium, Some("#00B050".into()))));
+        assert_eq!(s.borders.top, None);
+        assert_eq!(s.borders.bottom, Some(BorderLine::new(BorderStyle::Double, None)));
+        assert!(styles[2].wrap);
+        assert_eq!(styles[2].valign, VAlign::Center);
+        assert_eq!(styles[2].font, None);
+        assert_eq!(styles[3].valign, VAlign::Top);
+        assert_eq!(styles[3].align, Some(Align::Left));
+        assert!(!styles[3].wrap);
+    }
+
+    #[test]
+    fn column_widths_match_excel() {
+        // What Excel writes for its default column (8.43 characters).
+        assert_eq!(chars_to_px(9.140625), 64.0);
+        assert_eq!(px_to_chars(64.0), 9.140625);
+        // A 20-character column as Excel stores it.
+        assert_eq!(chars_to_px(20.7109375), 145.0);
+        for px in 8..=400 {
+            assert_eq!(chars_to_px(px_to_chars(px as f64)), px as f64, "{px}px");
+        }
     }
 }

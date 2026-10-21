@@ -68,8 +68,9 @@ fn replace_text(text: &str, query: &str, replacement: &str, match_case: bool) ->
     out
 }
 
-/// Column width in CSS pixels when none is set.
-pub const DEFAULT_COL_WIDTH: f64 = 100.0;
+/// Column width in CSS pixels when none is set: Excel's default of 8.43
+/// characters of Calibri 11, which is 64px.
+pub const DEFAULT_COL_WIDTH: f64 = 64.0;
 
 #[derive(Debug, Clone)]
 struct Cell {
@@ -110,6 +111,11 @@ static DEFAULT_STYLE: Style = Style {
     fill: None,
     align: None,
     number_format: NumberFormat::General,
+    font: None,
+    font_size: None,
+    wrap: false,
+    valign: crate::style::VAlign::Bottom,
+    borders: crate::style::Borders::NONE,
 };
 
 impl Sheet {
