@@ -124,12 +124,15 @@ impl std::fmt::Display for RefSpan {
 /// `'My Sheet'` when Excel requires it (spaces or punctuation, a leading
 /// digit, or a name that looks like a cell reference). `'` is doubled.
 pub fn quote_sheet_name(name: &str) -> String {
-    let plain = name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.')
-        && name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
-        && CellRef::parse(name).is_none()
-        && !looks_like_r1c1(name)
-        && !name.eq_ignore_ascii_case("TRUE")
-        && !name.eq_ignore_ascii_case("FALSE");
+    // Letters and digits of any script are fine unquoted, including combining
+    // marks such as Devanagari vowel signs (बिक्री); ASCII punctuation and spaces need quotes.
+    let plain =
+        name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.' || (!c.is_ascii() && !c.is_whitespace()))
+            && name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
+            && CellRef::parse(name).is_none()
+            && !looks_like_r1c1(name)
+            && !name.eq_ignore_ascii_case("TRUE")
+            && !name.eq_ignore_ascii_case("FALSE");
     if plain {
         name.to_string()
     } else {
@@ -495,17 +498,19 @@ mod tests {
         // A range reaching the last row keeps ending there.
         assert_eq!(remap_input("=SUM(A1:A1048576)", Axis::Row, &ins), "=SUM(A2:A1048576)");
         assert_eq!(remap_input("=A1048576", Axis::Row, &ins), "=#REF!");
-        assert_eq!(
-            remap_sheet_input("=data!A5+A5+'Other'!A5", "Data", Axis::Row, &ins),
-            "=data!A6+A5+'Other'!A5"
-        );
+        assert_eq!(remap_sheet_input("=data!A5+A5+'Other'!A5", "Data", Axis::Row, &ins), "=data!A6+A5+'Other'!A5");
         assert_eq!(remap_sheet_input("='My Sheet'!B2:B4", "my sheet", Axis::Row, &delete_map(1, 3)), "=#REF!");
     }
 
     #[test]
     fn renames_and_deletes_sheets() {
-        assert_eq!(rename_sheet_input("=Sheet2!A1+sheet2!B:B+A1", "Sheet2", "My Data"), "='My Data'!A1+'My Data'!B:B+A1");
-        assert_eq!(rename_sheet_input("='My Data'!A1", "my data", "Q1"), "=Q1!A1");
+        assert_eq!(
+            rename_sheet_input("=Sheet2!A1+sheet2!B:B+A1", "Sheet2", "My Data"),
+            "='My Data'!A1+'My Data'!B:B+A1"
+        );
+        // "Q1" is also a cell address, so Excel quotes it.
+        assert_eq!(rename_sheet_input("='My Data'!A1", "my data", "Q1"), "='Q1'!A1");
+        assert_eq!(rename_sheet_input("='My Data'!A1", "my data", "Sales"), "=Sales!A1");
         assert_eq!(rename_sheet_input(r#"="Sheet2!A1""#, "Sheet2", "X"), r#"="Sheet2!A1""#);
         assert_eq!(delete_sheet_input("=Sheet2!A1+Sheet3!A1", "Sheet2"), "=#REF!+Sheet3!A1");
     }

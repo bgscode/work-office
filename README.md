@@ -16,7 +16,8 @@ Opening the app shows a start page like Microsoft 365's: create a blank workbook
 
 - Canvas grid with virtual scrolling up to Excel's limits (1,048,576 × 16,384), resizable columns
 - Formulas with automatic, incremental recalculation and cycle detection
-- [127 functions](crates/sheets-engine/FUNCTIONS.md): `SUM`, `IF`, `XLOOKUP`, `VLOOKUP`, `SUMIFS`, `TEXT`, dates, statistics…
+- [158 functions](crates/sheets-engine/FUNCTIONS.md): `SUM`, `IF`, `XLOOKUP`, `VLOOKUP`, `SUMIFS`, `TEXT`, `PMT`, `NPV`, `SUBTOTAL`, dates, statistics…
+- Formulas across sheets (`Sheet2!A1`, `'My Data'!B:B`), whole columns/rows, F4 for `$` references
 - Formula autocomplete with syntax hints; click or drag cells (or use arrow keys) to insert references, shown in colour
 - Fill handle: drag to continue series (1, 2, 3 → 4, 5; Item 1 → Item 2; Mon → Tue; Jan → Feb) and copy formulas with shifted references
 - Formatting: bold, italic, underline, strikethrough, text and fill colours, alignment, number formats (₹ with Indian grouping, $, %, dates, times)
@@ -43,6 +44,7 @@ Opening the app shows a start page like Microsoft 365's: create a blank workbook
 | Enter / Tab (Shift to reverse) | Confirm and move |
 | Alt + Enter | New line inside the cell |
 | Ctrl/⌘ + Enter | Put the entry in every selected cell |
+| F4 (while typing a formula) | Cycle `$A$1` → `A$1` → `$A1` → `A1` |
 | Escape | Cancel edit (or close the suggestion list) |
 | Arrows while typing a formula after `(`, `,` or an operator | Insert a reference (Shift extends it) |
 | ↑ ↓ then Tab/Enter in the suggestion list | Pick a function |

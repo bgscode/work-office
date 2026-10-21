@@ -1,4 +1,4 @@
-import type { Selection } from "./geometry";
+import type { Cell, Selection } from "./geometry";
 
 /**
  * An edit in progress. `source` says which input has focus. In "enter" mode
@@ -11,6 +11,12 @@ export interface EditState {
   mode: "enter" | "edit";
   /** Caret position in `draft`. */
   caret: number;
+  /**
+   * Where the edit started. While typing a formula the user may switch sheets
+   * to point at cells there (`Sheet2!A1`); the entry still goes here.
+   */
+  sheet: number;
+  cell: Cell;
   /** The reference most recently inserted by clicking/arrowing (point mode). */
   point?: { start: number; end: number; sel: Selection };
 }

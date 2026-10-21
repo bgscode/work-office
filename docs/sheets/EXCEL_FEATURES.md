@@ -79,15 +79,15 @@ When you finish an item, update its row in the same pull request.
 | Feature | Status | Priority | Milestone |
 |---|---|---|---|
 | Formula engine, operators, error values, incremental recalculation, cycle detection | ✅ | P1 | – |
-| 127 functions: math, statistics, text, logical, lookup (`XLOOKUP`…), date & time, `SUMIFS` family | ✅ | P1 | – |
+| 158 functions: math, statistics, text, logical, lookup (`XLOOKUP`…), date & time, financial, reference, `SUMIFS` family | ✅ | P1 | – |
 | Autocomplete, syntax hints, click/arrow references with colour highlights | ✅ | P1 | – |
 | References rewritten on insert/delete/sort/copy | ✅ | P1 | – |
-| References to other sheets (`Sheet2!A1`, `'My Sheet'!A1:B5`) | ⬜ | P1 | M3 |
-| Whole column / row references (`A:A`, `1:1`) | ⬜ | P1 | M3 |
-| F4 to cycle `$A$1` → `A$1` → `$A1` → `A1` while editing | ⬜ | P1 | M3 |
-| `TODAY`, `NOW`, `RAND` refresh on every recalculation (volatile functions) | ⬜ | P1 | M3 |
-| `SUBTOTAL`, `AGGREGATE`, `ROW`, `COLUMN`, `ROWS`, `COLUMNS` | ⬜ | P1 | M3 |
-| Financial functions: `PMT`, `FV`, `PV`, `NPV`, `IRR`, `RATE`, `NPER` | ⬜ | P1 | M3 |
+| References to other sheets (`Sheet2!A1`, `'My Sheet'!A1:B5`), updated on rename/delete; click another sheet while typing a formula | ✅ | P1 | M3 |
+| Whole column / row references (`A:A`, `1:1`), cheap to recalculate | ✅ | P1 | M3 |
+| F4 to cycle `$A$1` → `A$1` → `$A1` → `A1` while editing | ✅ | P1 | M3 |
+| `TODAY`, `NOW`, `RAND`, `OFFSET`, `INDIRECT` recalculate on every change (volatile) | ✅ | P1 | M3 |
+| `SUBTOTAL`, `AGGREGATE`, `ROW`, `COLUMN`, `ROWS`, `COLUMNS`, `OFFSET`, `INDIRECT`, `ADDRESS` | ✅ | P1 | M3 |
+| Financial functions: `PMT`, `FV`, `PV`, `NPV`, `XNPV`, `IRR`, `XIRR`, `RATE`, `NPER`, `IPMT`, `PPMT`, `SLN`, `DB`, `DDB`, `EFFECT`, `NOMINAL` | ✅ | P1 | M3 |
 | Named ranges (Name Manager, use names in formulas) | ⬜ | P2 | – |
 | Dynamic arrays that spill: `FILTER`, `SORT`, `UNIQUE`, `SEQUENCE` | ⬜ | P2 | – |
 | Show formulas (Ctrl+`) | ⬜ | P2 | – |
@@ -177,7 +177,7 @@ Done in this order; each one is usable on its own.
 |---|---|---|
 | M1 ✅ | Editing & navigation | Alt+Enter, Ctrl+Enter, Paste Special, Replace, Ctrl+arrows, Ctrl+Home/End, Go To / Name Box, row/column select shortcuts, zoom |
 | M2 ✅ | Formatting | Font family/size, borders, merge, wrap, vertical alignment, row height, hide/unhide, Format Painter |
-| M3 | Formulas | Cross-sheet references, `A:A` references, F4, volatile functions, `SUBTOTAL`/`AGGREGATE`/`ROW`/`COLUMN`, financial functions |
+| M3 ✅ | Formulas | Cross-sheet references, `A:A` references, F4, volatile functions, `SUBTOTAL`/`AGGREGATE`/`ROW`/`COLUMN`, financial functions |
 | M4 | Data tools | Freeze panes, filter, data validation dropdowns, remove duplicates, conditional formatting (highlight rules) |
 | M5 | Charts | Column, bar, line, pie |
 | M6 | Files & print | Save to disk (Ctrl+S), print / PDF, `.xlsx` round-trip for everything above |

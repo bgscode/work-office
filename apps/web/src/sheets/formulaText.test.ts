@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canInsertRef, closeParens, enclosingFunction, findRefs, wordAtCaret } from "./formulaText";
+import { canInsertRef, closeParens, cycleReference, enclosingFunction, findRefs, refsOnSheet, wordAtCaret } from "./formulaText";
 
 describe("formulaText", () => {
   it("finds references but not function names or strings", () => {
@@ -10,6 +10,28 @@ describe("formulaText", () => {
       [4, 3, 4, 3],
     ]);
     expect(findRefs("A1+B2")).toEqual([]);
+  });
+
+  it("finds references to other sheets, whole columns and rows", () => {
+    const refs = findRefs("=Sheet2!A1+'My Data'!B:C+SUM(3:5)+'It''s'!$A$1");
+    expect(refs.map((r) => [r.sheet, r.top, r.left, r.bottom, r.right])).toEqual([
+      ["Sheet2", 0, 0, 0, 0],
+      ["My Data", 0, 1, 1_048_575, 2],
+      [undefined, 2, 0, 4, 16_383],
+      ["It's", 0, 0, 0, 0],
+    ]);
+    expect(findRefs("=LOG10(2)+SUM(1)")).toEqual([]);
+    const onData = refsOnSheet(findRefs("=A1+Data!B2"), "Data", "Sheet1");
+    expect(onData.map((r) => r.sheet)).toEqual(["Data"]);
+  });
+
+  it("cycles absolute references with F4", () => {
+    expect(cycleReference("=A1+B2", 3)).toEqual({ formula: "=$A$1+B2", caret: 5 });
+    expect(cycleReference("=$A$1", 5)?.formula).toBe("=A$1");
+    expect(cycleReference("=A$1", 4)?.formula).toBe("=$A1");
+    expect(cycleReference("=$A1", 4)?.formula).toBe("=A1");
+    expect(cycleReference("=Data!A1:B2", 11)?.formula).toBe("=Data!$A$1:$B$2");
+    expect(cycleReference("=SUM(", 5)).toBeNull();
   });
 
   it("finds the word being typed", () => {

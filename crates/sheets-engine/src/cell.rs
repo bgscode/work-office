@@ -91,6 +91,15 @@ impl Range {
         Range { start: c, end: c }
     }
 
+    pub fn contains(&self, c: CellRef) -> bool {
+        c.row >= self.start.row && c.row <= self.end.row && c.col >= self.start.col && c.col <= self.end.col
+    }
+
+    /// Number of cells, as u64 (a whole sheet is about 17 billion).
+    pub fn area(&self) -> u64 {
+        self.rows() as u64 * self.cols() as u64
+    }
+
     pub fn rows(&self) -> u32 {
         self.end.row - self.start.row + 1
     }

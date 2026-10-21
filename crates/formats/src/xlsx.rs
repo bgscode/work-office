@@ -101,12 +101,12 @@ pub fn read(bytes: &[u8]) -> Result<Workbook> {
     let mut book = Workbook::empty();
     for (name, rid) in sheet_list(&workbook_xml) {
         let Some(rel) = rels.iter().find(|r| r.id == rid) else { continue };
-        let t0 = Timer::start();
+        let mut timer = Timer::start();
         let xml = part(&mut zip, &resolve(&rel.target))?.unwrap_or_default();
-        let t1 = Timer::start();
+        let unzip = timer.lap();
         let data = sheet_data(&xml, &shared);
         drop(xml);
-        let t2 = Timer::start();
+        let parse = timer.lap();
         let mut sheet = Sheet::new();
         // Styles first: a cell formatted as Text keeps its input as text.
         for (at, index) in data.styles {
@@ -120,14 +120,15 @@ pub fn read(bytes: &[u8]) -> Result<Workbook> {
         let cells = data.cells.len();
         sheet.load_cells(data.cells);
         *sheet.layout_mut() = data.layout;
-        Timer::report(|| {
-            format!("{name}: unzip {}, parse {} ({cells} cells), load+calc {}", t0.ms(), t1.ms(), t2.ms())
-        });
+        let load = timer.lap();
+        Timer::report(|| format!("{name}: unzip {unzip}, parse {parse} ({cells} cells), load+calc {load}"));
         book.push_sheet(name, sheet);
     }
     if book.sheets.is_empty() {
         return Err(OfficeError::Parse("workbook has no worksheets".into()));
     }
+    // Sheets were calculated one by one; formulas reading other sheets need the whole book.
+    book.recalc_links();
     Ok(book)
 }
 
@@ -585,10 +586,15 @@ impl Timer {
         )
     }
 
-    /// Milliseconds since `start`, as text.
-    fn ms(&self) -> String {
+    /// Milliseconds since `start` or the previous lap, as text; starts the next lap.
+    fn lap(&mut self) -> String {
         #[cfg(not(target_arch = "wasm32"))]
-        return format!("{}ms", self.0.elapsed().as_millis());
+        {
+            let now = std::time::Instant::now();
+            let ms = (now - self.0).as_millis();
+            self.0 = now;
+            format!("{ms}ms")
+        }
         #[cfg(target_arch = "wasm32")]
         String::new()
     }
@@ -667,7 +673,7 @@ pub fn write(book: &Workbook) -> Result<Vec<u8>> {
     parts.push(("xl/_rels/workbook.xml.rels".into(), rels));
     parts.push(("xl/styles.xml".into(), styles.finish_xml()));
 
-    let t_zip = Timer::start();
+    let mut t_zip = Timer::start();
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
     // Level 3: about twice as fast as the default for files nearly as small.
     let options =
@@ -677,7 +683,8 @@ pub fn write(book: &Workbook) -> Result<Vec<u8>> {
         zip.write_all(xml.as_bytes()).map_err(|e| OfficeError::Io(e.to_string()))?;
     }
     let bytes = zip.finish().map_err(|e| OfficeError::Io(e.to_string()))?.into_inner();
-    Timer::report(|| format!("zip {}", t_zip.ms()));
+    let zip_time = t_zip.lap();
+    Timer::report(|| format!("zip {zip_time}"));
     Ok(bytes)
 }
 

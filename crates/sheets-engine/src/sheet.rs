@@ -107,13 +107,51 @@ impl Cell {
 #[derive(Debug, Clone)]
 enum Content {
     Literal(Value),
-    Formula { expr: Expr, precedents: Vec<Range>, value: Value },
+    Formula {
+        expr: Expr,
+        /// Ranges on this sheet the formula reads.
+        precedents: Vec<Range>,
+        /// Ranges on other sheets (`Sheet2!A1`): (sheet name in lower case, range).
+        external: Vec<(String, Range)>,
+        value: Value,
+    },
 }
+
+/// The number format Excel gives a formula's result by default: dates for
+/// date functions (also `=TODAY()+30`), time for `TIME`, currency for loan
+/// functions.
+fn implied_format(expr: &Expr) -> Option<NumberFormat> {
+    use crate::formula::BinOp;
+    match expr {
+        Expr::Call(name, _) => match name.as_str() {
+            "TODAY" | "DATE" | "EDATE" | "EOMONTH" | "WORKDAY" | "DATEVALUE" => Some(NumberFormat::Date),
+            "NOW" => Some(NumberFormat::DateTime),
+            "TIME" => Some(NumberFormat::Time),
+            "PMT" | "PV" | "FV" | "IPMT" | "PPMT" => Some(NumberFormat::Currency { symbol: "₹".into(), decimals: 2 }),
+            _ => None,
+        },
+        Expr::Binary(BinOp::Add | BinOp::Sub, a, b) => {
+            let date = |e: &Expr| matches!(implied_format(e), Some(NumberFormat::Date | NumberFormat::DateTime));
+            (date(a) || date(b)).then_some(NumberFormat::Date).filter(|_| !(date(a) && date(b)))
+        }
+        _ => None,
+    }
+}
+
+/// Ranges bigger than this (whole columns like `A:A`, large blocks) are kept
+/// as ranges in the dependency graph instead of one entry per cell.
+const BIG_RANGE: u64 = 4096;
 
 #[derive(Debug, Default, Clone)]
 pub struct Sheet {
     cells: HashMap<CellRef, Cell>,
     dependents: HashMap<CellRef, HashSet<CellRef>>,
+    /// Formulas that read a big range, with that range (see `BIG_RANGE`).
+    range_dependents: Vec<(Range, CellRef)>,
+    /// Formulas that read other sheets; the workbook recalculates them.
+    links: HashSet<CellRef>,
+    /// Formulas with volatile functions.
+    volatiles: HashSet<CellRef>,
     /// Smallest (rows, cols) that has ever held data. Grows only.
     extent: (u32, u32),
     styles: HashMap<CellRef, Style>,
@@ -320,16 +358,28 @@ impl Sheet {
         self.recalc(formulas.into_iter().collect());
     }
 
-    fn write(&mut self, at: CellRef, input: String) {
+    /// Store an input without recalculating (the caller recalculates: the sheet
+    /// itself in `set_inputs`, or the workbook for cross-sheet formulas).
+    pub(crate) fn write(&mut self, at: CellRef, input: String) {
         if let Some(Cell { content: Content::Formula { precedents, .. }, .. }) = self.cells.remove(&at) {
-            for c in precedents.iter().flat_map(Range::cells) {
-                if let Some(set) = self.dependents.get_mut(&c) {
-                    set.remove(&at);
-                    if set.is_empty() {
-                        self.dependents.remove(&c);
+            for r in &precedents {
+                if r.area() > BIG_RANGE {
+                    continue;
+                }
+                for c in r.cells() {
+                    if let Some(set) = self.dependents.get_mut(&c) {
+                        set.remove(&at);
+                        if set.is_empty() {
+                            self.dependents.remove(&c);
+                        }
                     }
                 }
             }
+            if precedents.iter().any(|r| r.area() > BIG_RANGE) {
+                self.range_dependents.retain(|(_, f)| *f != at);
+            }
+            self.links.remove(&at);
+            self.volatiles.remove(&at);
         }
         if input.is_empty() {
             return;
@@ -338,10 +388,32 @@ impl Sheet {
             Some(src) => {
                 let expr = formula::parse(src).unwrap_or_else(Expr::Error);
                 let precedents = expr.precedents();
-                for c in precedents.iter().flat_map(Range::cells) {
-                    self.dependents.entry(c).or_default().insert(at);
+                for r in &precedents {
+                    if r.area() > BIG_RANGE {
+                        self.range_dependents.push((*r, at));
+                    } else {
+                        for c in r.cells() {
+                            self.dependents.entry(c).or_default().insert(at);
+                        }
+                    }
                 }
-                Content::Formula { expr, precedents, value: Value::Empty }
+                let external: Vec<(String, Range)> =
+                    expr.sheet_precedents().into_iter().map(|(s, r)| (s.to_lowercase(), r)).collect();
+                if !external.is_empty() {
+                    self.links.insert(at);
+                }
+                // TODAY, NOW, RAND, OFFSET, INDIRECT...: recalculated every time.
+                if expr.is_volatile() {
+                    self.volatiles.insert(at);
+                }
+                // Like Excel, =TODAY() shows a date and =PMT(...) money unless the cell has a format.
+                if self.style(at).number_format == NumberFormat::General {
+                    if let Some(nf) = implied_format(&expr) {
+                        let style = Style { number_format: nf, ..self.style(at).clone() };
+                        self.set_style(at, style);
+                    }
+                }
+                Content::Formula { expr, precedents, external, value: Value::Empty }
             }
             None if self.style(at).number_format == NumberFormat::Text => Content::Literal(Value::Text(input.clone())),
             None => {
@@ -609,15 +681,61 @@ impl Sheet {
         (edits, styles)
     }
 
+    /// Call `f` for every formula that reads cell `c` on this sheet. (Allocation-free:
+    /// recalculation calls this once per formula.)
+    fn for_each_dependent(&self, c: CellRef, mut f: impl FnMut(CellRef)) {
+        if let Some(set) = self.dependents.get(&c) {
+            for d in set {
+                f(*d);
+            }
+        }
+        for (r, d) in &self.range_dependents {
+            if r.contains(c) {
+                f(*d);
+            }
+        }
+    }
+
+    /// Formulas that read cell `c` on this sheet.
+    pub(crate) fn dependents_of(&self, c: CellRef) -> impl Iterator<Item = CellRef> + '_ {
+        let big = self.range_dependents.iter().filter(move |(r, _)| r.contains(c)).map(|(_, f)| *f);
+        self.dependents.get(&c).into_iter().flatten().copied().chain(big)
+    }
+
+    /// Formulas that read other sheets.
+    pub(crate) fn links(&self) -> impl Iterator<Item = CellRef> + '_ {
+        self.links.iter().copied()
+    }
+
+    /// Formulas with volatile functions.
+    pub(crate) fn volatiles(&self) -> impl Iterator<Item = CellRef> + '_ {
+        self.volatiles.iter().copied()
+    }
+
+    /// Ranges on other sheets a formula reads: (sheet name in lower case, range).
+    pub(crate) fn external_precedents(&self, at: CellRef) -> &[(String, Range)] {
+        match self.cells.get(&at) {
+            Some(Cell { content: Content::Formula { external, .. }, .. }) => external,
+            _ => &[],
+        }
+    }
+
+    pub(crate) fn formula_expr(&self, at: CellRef) -> Option<&Expr> {
+        match self.cells.get(&at) {
+            Some(Cell { content: Content::Formula { expr, .. }, .. }) => Some(expr),
+            _ => None,
+        }
+    }
+
     fn recalc_from(&mut self, changed: &[CellRef]) {
         let mut dirty: HashSet<CellRef> = changed.iter().copied().filter(|&c| self.is_formula(c)).collect();
-        let mut stack: Vec<CellRef> = changed.to_vec();
+        dirty.extend(self.volatiles.iter().copied());
+        let mut stack: Vec<CellRef> = dirty.iter().copied().chain(changed.iter().copied()).collect();
         while let Some(c) = stack.pop() {
-            if let Some(deps) = self.dependents.get(&c) {
-                for &d in deps {
-                    if dirty.insert(d) {
-                        stack.push(d);
-                    }
+            let next: Vec<CellRef> = self.dependents_of(c).filter(|d| !dirty.contains(d)).collect();
+            for d in next {
+                if dirty.insert(d) {
+                    stack.push(d);
                 }
             }
         }
@@ -628,24 +746,24 @@ impl Sheet {
         // In-degree = how many dirty formulas this formula still waits on.
         let mut waiting: HashMap<CellRef, usize> = dirty.iter().map(|&c| (c, 0)).collect();
         for p in &dirty {
-            for f in self.dependents.get(p).into_iter().flatten() {
-                if let Some(n) = waiting.get_mut(f) {
+            self.for_each_dependent(*p, |f| {
+                if let Some(n) = waiting.get_mut(&f) {
                     *n += 1;
                 }
-            }
+            });
         }
         let mut ready: Vec<CellRef> = waiting.iter().filter(|(_, &n)| n == 0).map(|(&c, _)| c).collect();
         while let Some(c) = ready.pop() {
             waiting.remove(&c);
             self.evaluate(c);
-            for f in self.dependents.get(&c).into_iter().flatten() {
-                if let Some(n) = waiting.get_mut(f) {
+            self.for_each_dependent(c, |f| {
+                if let Some(n) = waiting.get_mut(&f) {
                     *n -= 1;
                     if *n == 0 {
-                        ready.push(*f);
+                        ready.push(f);
                     }
                 }
-            }
+            });
         }
         // Whatever is still waiting is in (or downstream of) a cycle.
         for c in waiting.into_keys() {
@@ -655,13 +773,13 @@ impl Sheet {
 
     fn evaluate(&mut self, at: CellRef) {
         let value = match self.cells.get(&at) {
-            Some(Cell { content: Content::Formula { expr, .. }, .. }) => formula::eval(expr, self),
+            Some(Cell { content: Content::Formula { expr, .. }, .. }) => formula::eval_at(expr, self, at).0,
             _ => return,
         };
         self.store(at, value);
     }
 
-    fn store(&mut self, at: CellRef, v: Value) {
+    pub(crate) fn store(&mut self, at: CellRef, v: Value) {
         if let Some(Cell { content: Content::Formula { value, .. }, .. }) = self.cells.get_mut(&at) {
             *value = v;
         }
@@ -671,6 +789,18 @@ impl Sheet {
 impl CellSource for Sheet {
     fn value(&self, at: CellRef) -> Value {
         Sheet::value(self, at).clone()
+    }
+
+    fn used_extent(&self) -> (u32, u32) {
+        self.extent
+    }
+
+    fn is_subtotal_cell(&self, sheet: Option<&str>, at: CellRef) -> bool {
+        sheet.is_none() && self.formula_expr(at).is_some_and(|e| e.calls("SUBTOTAL") || e.calls("AGGREGATE"))
+    }
+
+    fn is_row_hidden(&self, sheet: Option<&str>, row: u32) -> bool {
+        sheet.is_none() && Sheet::is_row_hidden(self, row)
     }
 }
 
@@ -797,6 +927,15 @@ mod tests {
         s.set_style(at("C7"), Style { font_size: Some(240), ..Style::default() });
         s.set_style(at("D9"), Style { wrap: true, ..Style::default() }); // wrap but empty
         assert_eq!(s.rows_to_measure(), vec![2, 4, 6]);
+    }
+
+    #[test]
+    fn formula_results_get_excels_default_formats() {
+        let s = sheet(&[("A1", "=TODAY()"), ("A2", "=DATE(2025,1,1)+30"), ("A3", "=PMT(1%,12,-1000)"), ("A4", "=1+1")]);
+        assert_eq!(s.style(at("A1")).number_format, NumberFormat::Date);
+        assert_eq!(s.display(at("A2")), "31-01-2025");
+        assert_eq!(s.display(at("A3")), "₹88.85");
+        assert_eq!(s.style(at("A4")).number_format, NumberFormat::General);
     }
 
     #[test]

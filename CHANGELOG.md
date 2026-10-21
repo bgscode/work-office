@@ -6,6 +6,8 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Added
 
+- Formulas (M3): references to other sheets with workbook-wide recalculation, kept correct when sheets are renamed or deleted and when rows/columns move; pointing at cells on another sheet while typing a formula; whole column/row references (`A:A`, `1:1`) without per-cell cost; F4; volatile functions; `ROW`, `COLUMN`, `ROWS`, `COLUMNS`, `OFFSET`, `INDIRECT`, `ADDRESS`, `SUBTOTAL`, `AGGREGATE`, financial functions (`PMT`, `NPV`, `IRR`, `XIRR`, `RATE`…), percentiles and quartiles (158 functions). Date, time and loan functions get Excel's default number formats.
+
 - Performance: a 3-sheet × 100,000-row workbook (3M cells) opens in about 2.6 s in the browser instead of hanging; autosave no longer freezes (edits are journaled to IndexedDB in milliseconds); faster `.xlsx` reading and writing (single-pass zero-allocation XML reader, shared strings, typed loading). See docs/PERFORMANCE.md.
 
 - Grid layout: row heights (drag the row border, double-click to autofit, Row Height / Column Width dialogs in Excel's units), automatic row height for wrapped text and bigger fonts, hide/unhide rows and columns, Merge & Center / Across / Cells / Unmerge (selection and arrow keys treat merged cells as one), Freeze Panes (at selection, top row, first column). All saved in .xlsx.

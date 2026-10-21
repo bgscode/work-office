@@ -174,12 +174,13 @@ fn dated_flows(args: &[Arg]) -> Result<(Vec<f64>, Vec<f64>), ErrorKind> {
 }
 
 /// XNPV(rate, values, dates): cash flows on arbitrary dates, discounted on a 365-day year.
+/// (`dated_flows` takes the values and dates, so skip the rate.)
 pub fn xnpv(args: &[Arg]) -> Result<Value, ErrorKind> {
     let rate = args[0].number()?;
     if rate <= -1.0 {
         return Err(ErrorKind::Num);
     }
-    let (values, dates) = dated_flows(args)?;
+    let (values, dates) = dated_flows(&args[1..])?;
     num(xnpv_of(rate, &values, &dates))
 }
 
@@ -298,7 +299,8 @@ pub fn db(args: &[Arg]) -> Result<Value, ErrorKind> {
     }
     let mut dep = 0.0;
     for p in 2..=period as u32 {
-        dep = if p as f64 == life + 1.0 { (cost - total) * rate * (12.0 - month) / 12.0 } else { (cost - total) * rate };
+        dep =
+            if p as f64 == life + 1.0 { (cost - total) * rate * (12.0 - month) / 12.0 } else { (cost - total) * rate };
         total += dep;
     }
     num(dep)
@@ -385,7 +387,9 @@ mod tests {
         approx("FV(0.06/12, 10, -200, -500, 1)", 2581.40);
         approx("FV(0.12/12, 12, -1000)", 12682.50);
         approx("PV(0.08/12, 12*20, 500, 0, 0)", -59777.15);
-        approx("NPER(0.12/12, -100, -1000, 10000, 1)", 60.0821);
+        // Microsoft's documented example: 59.6738657 with payments at the start (type 1).
+        approx("NPER(0.12/12, -100, -1000, 10000, 1)", 59.6739);
+        approx("NPER(0.12/12, -100, -1000, 10000)", 60.0821);
         approx("NPER(0.12/12, -100, -1000)", -9.578);
         approx("IPMT(0.1/12, 1, 3*12, 8000)", -66.67);
         approx("IPMT(0.1, 3, 3, 8000)", -292.45);
@@ -408,7 +412,8 @@ mod tests {
         let dates = ["=DATE(2008,1,1)", "=DATE(2008,3,1)", "=DATE(2008,10,30)", "=DATE(2009,2,15)", "=DATE(2009,4,1)"];
         approx_with(&values, &dates, "XNPV(0.09, A1:A5, B1:B5)", 2086.65, 0.01);
         approx_with(&values, &dates, "XIRR(A1:A5, B1:B5)", 0.373362535, 1e-6);
-        assert_eq!(run_with(&values, &dates[..4], "XNPV(0.09, A1:A5, B1:B5)"), Value::Error(ErrorKind::Num));
+        // Different numbers of values and dates.
+        assert_eq!(run_with(&values, &dates, "XNPV(0.09, A1:A5, B1:B4)"), Value::Error(ErrorKind::Num));
     }
 
     #[test]

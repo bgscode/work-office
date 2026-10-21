@@ -81,6 +81,19 @@ fn block(row: u32, col: u32, rows: u32, cols: u32) -> impl Iterator<Item = CellR
     (row..row + rows).flat_map(move |r| (col..col + cols).map(move |c| CellRef::new(r, c)))
 }
 
+impl SheetsDocument {
+    /// New inputs for formulas on other sheets that point at rows/columns of `sheet` that moved.
+    fn lines_moved(
+        &self,
+        sheet: usize,
+        axis: Axis,
+        map: &dyn Fn(u32) -> Option<u32>,
+    ) -> Vec<(usize, Vec<(CellRef, String)>)> {
+        let name = self.book.sheets[sheet].name.clone();
+        self.book.link_edits(Some(sheet), |input| refs::remap_sheet_input(input, &name, axis, map))
+    }
+}
+
 fn rect(top: u32, left: u32, bottom: u32, right: u32) -> Range {
     Range::new(CellRef::new(top, left), CellRef::new(bottom, right))
 }
@@ -331,14 +344,18 @@ impl SheetsDocument {
     /// `axis`: "rows" or "cols".
     #[wasm_bindgen(js_name = insertLines)]
     pub fn insert_lines(&mut self, sheet: usize, axis: &str, at: u32, count: u32) {
-        let new = self.sheet(sheet).with_inserted(parse_axis(axis), at, count);
-        self.apply(ReplaceSheet { sheet, with: Box::new(new) });
+        let axis = parse_axis(axis);
+        let new = self.sheet(sheet).with_inserted(axis, at, count);
+        let links = self.lines_moved(sheet, axis, &refs::insert_map(at, count));
+        self.apply(ReplaceSheet { sheet, with: Box::new(new), links });
     }
 
     #[wasm_bindgen(js_name = deleteLines)]
     pub fn delete_lines(&mut self, sheet: usize, axis: &str, at: u32, count: u32) {
-        let new = self.sheet(sheet).with_deleted(parse_axis(axis), at, count);
-        self.apply(ReplaceSheet { sheet, with: Box::new(new) });
+        let axis = parse_axis(axis);
+        let new = self.sheet(sheet).with_deleted(axis, at, count);
+        let links = self.lines_moved(sheet, axis, &refs::delete_map(at, count));
+        self.apply(ReplaceSheet { sheet, with: Box::new(new), links });
     }
 
     /// Sort the rows of a rectangle by the values in column `key_col`.
@@ -354,7 +371,7 @@ impl SheetsDocument {
         ascending: bool,
     ) {
         let new = self.sheet(sheet).with_sorted_rows(rect(top, left, bottom, right), key_col, ascending);
-        self.apply(ReplaceSheet { sheet, with: Box::new(new) });
+        self.apply(ReplaceSheet::new(sheet, new));
     }
 
     /// Fill-handle drag: extend the source rectangle `count` cells in
@@ -450,6 +467,12 @@ impl SheetsDocument {
     #[wasm_bindgen(js_name = hasCopied)]
     pub fn has_copied(&self) -> bool {
         self.clip.is_some()
+    }
+
+    /// A sheet name as written in a formula: `Sheet2`, or quoted (`'My Sheet'`) when needed.
+    #[wasm_bindgen(js_name = quoteSheetName)]
+    pub fn quote_sheet_name(name: &str) -> String {
+        refs::quote_sheet_name(name)
     }
 
     /// Shift a formula's relative references, as when it is copied.

@@ -5,9 +5,9 @@ import { insertFunctionText, searchFunctions, sliderToZoom, statusMode, stepZoom
 describe("statusMode", () => {
   it("follows Excel's Ready / Enter / Edit / Point", () => {
     expect(statusMode(null, false)).toBe("Ready");
-    expect(statusMode({ draft: "1", source: "cell", mode: "enter", caret: 1 }, false)).toBe("Enter");
-    expect(statusMode({ draft: "1", source: "cell", mode: "edit", caret: 1 }, false)).toBe("Edit");
-    expect(statusMode({ draft: "=", source: "cell", mode: "enter", caret: 1 }, true)).toBe("Point");
+    expect(statusMode({ draft: "1", source: "cell", mode: "enter", caret: 1, sheet: 0, cell: { row: 0, col: 0 } }, false)).toBe("Enter");
+    expect(statusMode({ draft: "1", source: "cell", mode: "edit", caret: 1, sheet: 0, cell: { row: 0, col: 0 } }, false)).toBe("Edit");
+    expect(statusMode({ draft: "=", source: "cell", mode: "enter", caret: 1, sheet: 0, cell: { row: 0, col: 0 } }, true)).toBe("Point");
   });
 });
 

@@ -83,7 +83,9 @@ export function SheetTabs({ names, active, onSelect, onAdd, onRename, onContextM
               aria-selected={i === active}
               className={i === active ? "active" : ""}
               title="Double-click to rename"
-              onClick={() => onSelect(i)}
+              // Keep focus where it is: switching sheets while typing a formula points at that sheet.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onSelect(i)}
               onDoubleClick={() => {
                 setDraft(name);
                 setRenaming(i);

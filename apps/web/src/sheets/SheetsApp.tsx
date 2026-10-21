@@ -14,7 +14,7 @@ import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { FindBar, type FindOptions } from "./FindBar";
 import { FormulaAssist } from "./FormulaAssist";
 import { FormulaBar } from "./FormulaBar";
-import { canInsertRef, closeParens, enclosingFunction, findRefs, wordAtCaret } from "./formulaText";
+import { canInsertRef, closeParens, cycleReference, enclosingFunction, findRefs, refsOnSheet, wordAtCaret } from "./formulaText";
 import {
   MAX_COLS,
   MAX_ROWS,
@@ -229,7 +229,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
 
   function startEdit(source: EditState["source"], initialText?: string) {
     const draft = initialText ?? doc.input(sheet, row, col);
-    setEditing({ draft, source, mode: initialText === undefined ? "edit" : "enter", caret: draft.length });
+    setEditing({ draft, source, mode: initialText === undefined ? "edit" : "enter", caret: draft.length, sheet, cell: { row, col } });
     setAssistDismissedAt(null);
     setAssistIndex(0);
   }
@@ -241,25 +241,34 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
 
   function commit(dRow: number, dCol: number) {
     if (!editing) return;
+    // The entry goes where the edit started, even if another sheet is showing.
+    const target = editing.sheet;
+    const { row: r, col: c } = editing.cell;
     const value = closeParens(editing.draft);
-    if (value !== doc.input(sheet, row, col)) {
+    if (value !== doc.input(target, r, c)) {
       // A line break (Alt+Enter) turns on Wrap Text in the same undo step, like Excel.
-      if (value.includes("\n") && !activeStyle.wrap) doc.setInputWrapped(sheet, row, col, value);
-      else doc.setInputs(sheet, Uint32Array.of(row), Uint32Array.of(col), [value]);
-      widenForNumber(row, col);
+      const wrapped = !!parseStyle(doc.styleBlock(target, r, c, 1, 1)[0]).wrap;
+      if (value.includes("\n") && !wrapped) doc.setInputWrapped(target, r, c, value);
+      else doc.setInputs(target, Uint32Array.of(r), Uint32Array.of(c), [value]);
+      widenForNumber(r, c, target);
       changed();
     }
     setEditing(null);
-    if (dRow || dCol) setSelection(navigate(selection, dRow, dCol, false, geo));
+    if (target !== sheet) {
+      setSheet(target);
+      setSelection(single(editing.cell));
+    } else if (dRow || dCol) {
+      setSelection(navigate(selection, dRow, dCol, false, geo));
+    }
   }
 
   /**
    * Like Excel: when a number or date typed into a default-width column
    * doesn't fit, the column widens instead of showing ####.
    */
-  function widenForNumber(r: number, c: number) {
-    if (doc.kindBlock(sheet, r, c, 1, 1)[0] !== ValueKind.Number) return;
-    const widths = doc.columnWidths(sheet);
+  function widenForNumber(r: number, c: number, s = sheet) {
+    if (doc.kindBlock(s, r, c, 1, 1)[0] !== ValueKind.Number) return;
+    const widths = doc.columnWidths(s);
     for (let i = 0; i < widths.length; i += 2) if (widths[i] === c) return; // user-set width: keep it
     const ctx = document.createElement("canvas").getContext("2d")!;
     ctx.font = fontFor(parseStyle(doc.styleBlock(sheet, r, c, 1, 1)[0]));
@@ -299,7 +308,11 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
   // ---- formula assistance: references, autocomplete, point mode
 
   const isFormula = !!editing && editing.draft.startsWith("=");
-  const highlights = useMemo(() => (isFormula ? findRefs(editing!.draft) : []), [isFormula, editing?.draft]);
+  const highlights = useMemo(() => {
+    if (!isFormula) return [];
+    const names = doc.sheetNames();
+    return refsOnSheet(findRefs(editing!.draft), names[sheet], names[editing!.sheet]);
+  }, [isFormula, editing?.draft, editing?.sheet, sheet, revision]);
   const pointMode =
     isFormula && (canInsertRef(editing!.draft, editing!.caret) || editing!.point?.end === editing!.caret);
 
@@ -324,6 +337,13 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
   /** Keys handled before the editor's own: line breaks, Ctrl+Enter, autocomplete. */
   function onEditorKey(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
     if (!editing) return false;
+    if (e.key === "F4" && isFormula) {
+      // F4: cycle $A$1 -> A$1 -> $A1 -> A1 for the reference at the caret.
+      e.preventDefault();
+      const next = cycleReference(editing.draft, editing.caret);
+      if (next) replaceDraft(next.formula, next.caret);
+      return true;
+    }
     if (e.key === "Enter" && e.altKey) {
       // Alt+Enter: line break inside the cell.
       e.preventDefault();
@@ -363,7 +383,9 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
   /** Insert (or, while dragging, update) a reference to `s` at the caret. */
   function point(s: Selection, phase: "start" | "drag") {
     if (!editing) return;
-    const text = rangeName(s);
+    // Pointing on another sheet writes Sheet2!A1 (quoted when the name needs it).
+    const prefix = sheet === editing.sheet ? "" : `${SheetsDocument.quoteSheetName(doc.sheetNames()[sheet])}!`;
+    const text = prefix + rangeName(s);
     const replacing = editing.point && (phase === "drag" || editing.caret === editing.point.end);
     const start = replacing ? editing.point!.start : editing.caret;
     const end = replacing ? editing.point!.end : editing.caret;
@@ -762,7 +784,14 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       return;
     }
     const next = insertFunctionText(before?.draft ?? null, before?.caret ?? 0, f.name);
-    setEditing({ draft: next.draft, caret: next.caret, source: before?.source ?? "cell", mode: "edit" });
+    setEditing({
+      draft: next.draft,
+      caret: next.caret,
+      source: before?.source ?? "cell",
+      mode: "edit",
+      sheet: before?.sheet ?? sheet,
+      cell: before?.cell ?? { row, col },
+    });
     pendingCaret.current = next.caret;
     setAssistDismissedAt(null);
     setAssistIndex(0);
@@ -1241,7 +1270,13 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
           names={doc.sheetNames()}
           active={sheet}
           onSelect={(i) => {
-            if (editing) commit(0, 0);
+            if (editing && pointMode) {
+              // Typing a formula: keep editing (in the formula bar) and point at cells on that sheet.
+              setEditing({ ...editing, source: "bar" });
+              pendingCaret.current = editing.caret;
+            } else if (editing) {
+              commit(0, 0);
+            }
             setSheet(i);
             setSelection(single({ row: 0, col: 0 }));
           }}
