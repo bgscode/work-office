@@ -3,7 +3,7 @@
 
 import { MAX_COLS } from "./geometry";
 
-export const DEFAULT_COL_WIDTH = 100;
+export const DEFAULT_COL_WIDTH = 64;
 
 export class ColumnLayout {
   private readonly offsets: Float64Array;

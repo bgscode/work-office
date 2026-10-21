@@ -1,4 +1,5 @@
-import type { KeyboardEvent, ReactNode, RefObject } from "react";
+import type { KeyboardEvent, MouseEvent, ReactNode, RefObject } from "react";
+import { Icon, Tooltip } from "@office/ui";
 import { FORMULA_BAR_ID, type EditState } from "./types";
 
 interface Props {
@@ -15,6 +16,8 @@ interface Props {
   onEditorKey: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
   onCommit: (dRow: number, dCol: number) => void;
   onCancel: () => void;
+  /** The fx button: open the Insert Function dialog. */
+  onInsertFunction: () => void;
 }
 
 export function FormulaBar(props: Props) {
@@ -35,10 +38,30 @@ export function FormulaBar(props: Props) {
     }
   }
 
+  // Clicking the bar's buttons must not end the edit by moving focus.
+  const keepFocus = (e: MouseEvent) => e.preventDefault();
+
   return (
     <div className="formula-bar">
       {props.nameBox}
-      <span className="fx">fx</span>
+      <span className="formula-bar-divider" aria-hidden />
+      <span className="formula-buttons">
+        <Tooltip label="Cancel" shortcut="Esc">
+          <button className="fb-cancel" aria-label="Cancel" disabled={!editing} onMouseDown={keepFocus} onClick={props.onCancel}>
+            <Icon name="close" size={14} />
+          </button>
+        </Tooltip>
+        <Tooltip label="Enter" shortcut="Enter">
+          <button className="fb-enter" aria-label="Enter" disabled={!editing} onMouseDown={keepFocus} onClick={() => props.onCommit(0, 0)}>
+            <Icon name="check" size={14} />
+          </button>
+        </Tooltip>
+        <Tooltip label="Insert Function" shortcut="Shift+F3">
+          <button className="fx" aria-label="Insert Function" onMouseDown={keepFocus} onClick={props.onInsertFunction}>
+            <Icon name="function" size={16} />
+          </button>
+        </Tooltip>
+      </span>
       {/* The wrapper keeps the bar one line tall; while editing a multi-line
           cell the textarea grows downward over the grid instead of pushing it. */}
       <div className="formula-input">

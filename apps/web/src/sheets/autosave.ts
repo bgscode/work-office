@@ -21,11 +21,14 @@ function fromBase64(text: string): Uint8Array {
   return bytes;
 }
 
-export function saveDraft(name: string, xlsx: Uint8Array) {
+/** Returns false if the browser refused to store it (storage full or blocked). */
+export function saveDraft(name: string, xlsx: Uint8Array): boolean {
   try {
     localStorage.setItem(KEY, JSON.stringify({ name, xlsx: toBase64(xlsx) } satisfies Saved));
+    return true;
   } catch {
     // Storage full or unavailable (private mode): autosave is best effort.
+    return false;
   }
 }
 
