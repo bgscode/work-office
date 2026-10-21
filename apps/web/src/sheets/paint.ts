@@ -1,7 +1,8 @@
 // Paints the visible part of the grid onto a canvas. Pure function of its
 // inputs: Grid.tsx calls it whenever anything visible changes.
 
-import { ValueKind, parseStyle, type CellStyle, type SheetsDocument } from "@office/engine";
+import { parseStyle, type SheetsDocument } from "@office/engine";
+import { drawBorders, drawCell, spillClip, textOverflow } from "./cellRenderer";
 import { HEADER_HEIGHT, HEADER_WIDTH, MAX_COLS, MAX_ROWS, ROW_HEIGHT, colName, selectionRect, type Rect, type Selection } from "./geometry";
 import type { ColumnLayout } from "./layout";
 
@@ -107,68 +108,26 @@ export function paint(ctx: CanvasRenderingContext2D, p: PaintInput) {
   }
   ctx.stroke();
 
-  // Cell text.
-  ctx.textBaseline = "middle";
-  const pad = 4;
+  // Cell text (cellRenderer.ts), then borders on top so overflowing text never hides them.
+  const textOpts = { textColor: theme.text, errorColor: theme.error };
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const i = at(r, c);
-      // Line breaks (Alt+Enter) show as spaces until wrap text is supported.
-      const text = texts[i].includes("\n") ? texts[i].replace(/\n/g, " ") : texts[i];
-      if (!text) continue;
-      const kind = kinds[i];
-      const style = styles[i];
+      if (!texts[i]) continue;
       const col = firstCol + c;
-      const x = xOf(col);
-      const y = yOf(firstRow + r);
-      const w = layout.width(col);
-      ctx.font = fontFor(style);
-      const align = style.align ?? (kind === ValueKind.Number ? "right" : kind === ValueKind.Text ? "left" : "center");
-      let shown = text;
-      let textWidth = ctx.measureText(shown).width;
-
-      // Numbers that don't fit show ### like Excel, rather than a misleading partial number.
-      if (kind === ValueKind.Number && textWidth > w - 2 * pad) {
-        shown = "#".repeat(Math.max(1, Math.floor((w - 2 * pad) / ctx.measureText("#").width)));
-        textWidth = ctx.measureText(shown).width;
-      }
-
-      // Left-aligned text may spill into empty cells to the right.
-      let clipRight = x + w;
-      if (align === "left" && textWidth > w - 2 * pad) {
-        let next = c + 1;
-        while (next < cols && !texts[at(r, next)] && !styles[at(r, next)].fill && clipRight < x + pad + textWidth) {
-          clipRight += layout.width(firstCol + next);
-          next++;
-        }
-        if (clipRight > x + w) {
-          ctx.fillStyle = theme.background;
-          ctx.fillRect(x + w, y + 1, clipRight - (x + w), ROW_HEIGHT - 1);
-        }
-      }
-
-      const tx = align === "right" ? x + w - pad - textWidth : align === "center" ? x + (w - textWidth) / 2 : x + pad;
-      ctx.fillStyle = kind === ValueKind.Error ? theme.error : style.color ?? theme.text;
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(x + 1, y, clipRight - x - 2, ROW_HEIGHT);
-      ctx.clip();
-      ctx.fillText(shown, tx, y + ROW_HEIGHT / 2);
-      if (style.u || style.s) {
-        ctx.strokeStyle = ctx.fillStyle;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        if (style.u) {
-          ctx.moveTo(tx, y + ROW_HEIGHT / 2 + 7.5);
-          ctx.lineTo(tx + textWidth, y + ROW_HEIGHT / 2 + 7.5);
-        }
-        if (style.s) {
-          ctx.moveTo(tx, y + ROW_HEIGHT / 2 + 0.5);
-          ctx.lineTo(tx + textWidth, y + ROW_HEIGHT / 2 + 0.5);
-        }
-        ctx.stroke();
-      }
-      ctx.restore();
+      const cell = { x: xOf(col), y: yOf(firstRow + r), w: layout.width(col), h: ROW_HEIGHT };
+      const overflow = textOverflow(ctx, cell, texts[i], kinds[i], styles[i]);
+      const free = (cc: number) => cc >= firstCol && cc < firstCol + cols && !texts[at(r, cc - firstCol)] && !styles[at(r, cc - firstCol)].fill;
+      const clip = spillClip(cell, overflow, col, free, (cc) => layout.width(cc));
+      drawCell(ctx, cell, texts[i], kinds[i], styles[i], { ...textOpts, clipLeft: clip.left, clipRight: clip.right });
+    }
+  }
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const style = styles[at(r, c)];
+      if (!style.border) continue;
+      const col = firstCol + c;
+      drawBorders(ctx, { x: xOf(col), y: yOf(firstRow + r), w: layout.width(col), h: ROW_HEIGHT }, style.border, style.fill ?? theme.background);
     }
   }
 
@@ -285,6 +244,4 @@ function paintHeaders(
   ctx.stroke();
 }
 
-export function fontFor(style: CellStyle): string {
-  return `${style.i ? "italic " : ""}${style.b ? "bold " : ""}13px ${theme.fontFamily}`;
-}
+export { fontFor } from "./cellRenderer";

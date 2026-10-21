@@ -104,6 +104,11 @@ static DEFAULT_STYLE: Style = Style {
     fill: None,
     align: None,
     number_format: NumberFormat::General,
+    font: None,
+    font_size: None,
+    wrap: false,
+    valign: crate::style::VAlign::Bottom,
+    borders: crate::style::Borders::NONE,
 };
 
 impl Sheet {

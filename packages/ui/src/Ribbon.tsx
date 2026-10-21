@@ -12,6 +12,10 @@ export interface RibbonCommand {
   separatorBefore?: boolean;
   /** Custom control (colour picker, dropdown) instead of a plain button. */
   render?: () => ReactNode;
+  /** Excel ribbon group the command belongs to ("Clipboard", "Font", "Alignment", …). */
+  group?: string;
+  /** Icon drawn instead of (or beside) the label. */
+  icon?: ReactNode;
 }
 
 export interface RibbonTab {
@@ -43,12 +47,13 @@ export function Ribbon({ tabs, initialTab }: { tabs: RibbonTab[]; initialTab?: s
               <button
                 className={c.active ? "pressed" : ""}
                 aria-pressed={c.active}
+                aria-label={c.icon ? c.label : undefined}
                 title={c.title ?? c.label}
                 // Keep focus (and the cell edit) where it is when clicking toolbar buttons.
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={c.onRun}
               >
-                {c.label}
+                {c.icon ?? c.label}
               </button>
             )}
           </span>
