@@ -13,14 +13,20 @@
 //! See `crates/sheets-engine/README.md` for a guided tour.
 
 pub mod cell;
+pub mod conditional_format;
+pub mod data_tools;
 pub mod date;
+pub mod dedupe;
 pub mod fill;
+pub mod filter;
 pub mod format;
 pub mod formula;
 pub mod functions;
 pub mod ops;
 pub mod sheet;
+pub mod sort;
 pub mod style;
+pub mod validation;
 pub mod value;
 pub mod workbook;
 

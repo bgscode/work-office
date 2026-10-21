@@ -30,6 +30,9 @@ use sheets_engine::{Align, CellRef, ErrorKind, NumberFormat, Sheet, Style, Value
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
+#[path = "xlsx_data_tools.rs"]
+mod data_tools;
+
 const NS_MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const NS_REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const NS_PKG_REL: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
@@ -92,6 +95,12 @@ pub fn read(bytes: &[u8]) -> Result<Workbook> {
         None => Vec::new(),
     };
 
+    // Conditional-format styles (`<dxfs>`), for the Data tools.
+    let dxfs = match rels.iter().find(|r| r.kind.ends_with("/styles")) {
+        Some(r) => part(&mut zip, &resolve(&r.target))?.map(|xml| data_tools::read_dxfs(&xml)).unwrap_or_default(),
+        None => Vec::new(),
+    };
+
     let mut book = Workbook::empty();
     for (name, rid) in sheet_list(&workbook_xml) {
         let Some(rel) = rels.iter().find(|r| r.id == rid) else { continue };
@@ -108,6 +117,7 @@ pub fn read(bytes: &[u8]) -> Result<Workbook> {
             sheet.set_col_width(col, Some(width));
         }
         sheet.set_inputs(data.cells);
+        data_tools::apply(&mut sheet, data_tools::read_sheet(&xml, &dxfs));
         book.push_sheet(name, sheet);
     }
     if book.sheets.is_empty() {
@@ -489,6 +499,8 @@ struct StyleTable {
     fonts: Vec<(bool, bool, bool, bool, Option<String>)>,
     fills: Vec<String>,
     custom_formats: Vec<String>,
+    /// Conditional-format styles, referenced by `dxfId` (see `xlsx_data_tools.rs`).
+    dxfs: Vec<sheets_engine::conditional_format::CfFormat>,
 }
 
 impl StyleTable {
@@ -575,6 +587,7 @@ impl StyleTable {
         xml.push_str(r#"<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>"#);
         xml.push_str(&format!(r#"<cellXfs count="{}">{cell_xfs}</cellXfs>"#, self.xfs.len() + 1));
         xml.push_str(r#"<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>"#);
+        xml.push_str(&self.dxfs_xml());
         xml.push_str("</styleSheet>");
         xml
     }
@@ -630,7 +643,11 @@ fn worksheet_xml(sheet: &Sheet, styles: &mut StyleTable) -> String {
     if current_row.is_some() {
         xml.push_str("</row>");
     }
-    xml.push_str("</sheetData></worksheet>");
+    xml.push_str("</sheetData>");
+    xml.push_str(&data_tools::autofilter_xml(sheet));
+    // <mergeCells> belongs here, between <autoFilter> and <conditionalFormatting>.
+    xml.push_str(&data_tools::cf_and_validation_xml(sheet, styles));
+    xml.push_str("</worksheet>");
     xml
 }
 

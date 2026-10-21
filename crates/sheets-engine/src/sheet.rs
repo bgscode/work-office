@@ -92,6 +92,8 @@ pub struct Sheet {
     styles: HashMap<CellRef, Style>,
     /// Column index -> width in pixels, for columns that aren't the default width.
     col_widths: BTreeMap<u32, f64>,
+    /// AutoFilter, data validation and conditional formatting (see `data_tools.rs`).
+    pub(crate) tools: crate::data_tools::DataTools,
 }
 
 static EMPTY: Value = Value::Empty;
@@ -348,7 +350,7 @@ impl Sheet {
                 Axis::Col => map(at.col).filter(|c| *c < limit).map(|c| CellRef::new(at.row, c)),
             }
         };
-        let mut out = Sheet::new();
+        let mut out = Sheet { tools: self.tools.remapped(axis, map), ..Sheet::new() };
         for (at, style) in &self.styles {
             if let Some(to) = move_cell(*at) {
                 out.styles.insert(to, style.clone());
@@ -390,7 +392,7 @@ impl Sheet {
         }
         let in_range =
             |at: &CellRef| at.col >= range.start.col && at.col <= range.end.col && new_row_of.contains_key(&at.row);
-        let mut out = Sheet { col_widths: self.col_widths.clone(), ..Sheet::new() };
+        let mut out = Sheet { col_widths: self.col_widths.clone(), tools: self.tools.clone(), ..Sheet::new() };
         for (at, style) in &self.styles {
             let to = if in_range(at) { CellRef::new(new_row_of[&at.row], at.col) } else { *at };
             out.styles.insert(to, style.clone());
