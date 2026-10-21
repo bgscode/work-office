@@ -25,6 +25,8 @@ pub enum Token {
     Ge,
     /// An error literal such as `#REF!` (written into formulas when references are deleted).
     Error(ErrorKind),
+    /// A sheet prefix: `Sheet2!` or `'My Sheet'!` (quotes removed, `''` unescaped).
+    Sheet(String),
 }
 
 pub fn tokenize(src: &str) -> Result<Vec<Token>, ErrorKind> {
@@ -120,12 +122,46 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, ErrorKind> {
                 let text: String = chars[start..i].iter().collect();
                 tokens.push(Token::Number(text.parse().map_err(|_| ErrorKind::Parse)?));
             }
+            '\'' => {
+                // 'Quoted sheet name'! ('' inside is an escaped quote).
+                let mut name = String::new();
+                i += 1;
+                loop {
+                    match chars.get(i) {
+                        None => return Err(ErrorKind::Parse),
+                        Some('\'') if chars.get(i + 1) == Some(&'\'') => {
+                            name.push('\'');
+                            i += 2;
+                        }
+                        Some('\'') => {
+                            i += 1;
+                            break;
+                        }
+                        Some(&ch) => {
+                            name.push(ch);
+                            i += 1;
+                        }
+                    }
+                }
+                if chars.get(i) != Some(&'!') || name.is_empty() {
+                    return Err(ErrorKind::Parse);
+                }
+                i += 1;
+                tokens.push(Token::Sheet(name));
+            }
             c if c.is_alphabetic() || c == '_' || c == '$' => {
                 let start = i;
                 while i < chars.len() && (chars[i].is_alphanumeric() || matches!(chars[i], '_' | '$' | '.')) {
                     i += 1;
                 }
-                tokens.push(Token::Ident(chars[start..i].iter().collect()));
+                let word: String = chars[start..i].iter().collect();
+                if chars.get(i) == Some(&'!') {
+                    // Sheet2!A1
+                    i += 1;
+                    tokens.push(Token::Sheet(word));
+                } else {
+                    tokens.push(Token::Ident(word));
+                }
             }
             _ => return Err(ErrorKind::Parse),
         }
@@ -155,5 +191,21 @@ mod tests {
             ]
         );
         assert!(tokenize("\"open").is_err());
+    }
+
+    #[test]
+    fn tokenizes_sheet_prefixes() {
+        assert_eq!(
+            tokenize("Sheet2!A1+'My ''Q'' Sheet'!B2").unwrap(),
+            vec![
+                Token::Sheet("Sheet2".into()),
+                Token::Ident("A1".into()),
+                Token::Plus,
+                Token::Sheet("My 'Q' Sheet".into()),
+                Token::Ident("B2".into()),
+            ]
+        );
+        assert!(tokenize("'no bang'").is_err());
+        assert!(tokenize("'open").is_err());
     }
 }
