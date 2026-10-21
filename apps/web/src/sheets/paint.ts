@@ -9,6 +9,7 @@
 import { parseStyle, type CellStyle, type SheetsDocument } from "@office/engine";
 import { drawBorders, drawCell, spillClip, textOverflow } from "./cellRenderer";
 import { HEADER_HEIGHT, HEADER_WIDTH, MAX_COLS, MAX_ROWS, colName, selectionRect, type Rect, type Selection } from "./geometry";
+import type { FilterInfo } from "./features/dataTools";
 import type { ColumnLayout, RowLayout } from "./layout";
 import type { MergeIndex } from "./merges";
 import { Panes, type Freeze, type Pane } from "./panes";
@@ -29,6 +30,10 @@ const theme = {
   /** Marks hidden rows/columns in the headers. */
   hiddenMarker: "#8a8886",
   freezeLine: "#9e9e9e",
+  /** Row numbers of rows a filter is narrowing, and filter buttons that filter. */
+  filtered: "#0063b1",
+  /** Circle Invalid Data. */
+  invalidCircle: "#e00000",
   selectionFill: "rgba(0, 0, 0, 0.08)",
   selectionBorder: "#217346",
   fontFamily: "Calibri, Carlito, 'Segoe UI', Arial, sans-serif",
@@ -64,6 +69,19 @@ export interface PaintInput {
   /** Area a fill-handle drag would fill. */
   fillPreview: Rect | null;
   showFillHandle: boolean;
+  /** AutoFilter: dropdown buttons on its header row. */
+  filter: FilterInfo | null;
+  /** Circle Invalid Data. */
+  circles: { row: number; col: number }[];
+}
+
+/** Size of an AutoFilter dropdown button. */
+export const FILTER_BUTTON_SIZE = 16;
+
+/** Where the filter button sits in a header cell: bottom-right, like Excel. */
+export function filterButtonBox(cell: { x: number; y: number; w: number; h: number }) {
+  const size = Math.min(FILTER_BUTTON_SIZE, cell.h - 2, cell.w - 2);
+  return { x: cell.x + cell.w - size - 2, y: cell.y + cell.h - size - 2, size };
 }
 
 export function makePanes(geo: SheetGeometry, scroll: { top: number; left: number }, view: { width: number; height: number }): Panes {
@@ -116,6 +134,16 @@ function paintCells(ctx: CanvasRenderingContext2D, p: PaintInput, pane: Pane) {
   const texts = doc.displayBlock(sheet, r0, c0, nRows, nCols);
   const kinds = doc.kindBlock(sheet, r0, c0, nRows, nCols);
   const styles = doc.styleBlock(sheet, r0, c0, nRows, nCols).map(parseStyle);
+  // Conditional formatting overrides the cell's own fill, colour and font style;
+  // data bars are drawn under the text.
+  const cf = doc.cfBlock(sheet, r0, c0, nRows, nCols);
+  const bars: ({ len: number; color: string } | null)[] = [];
+  for (let i = 0; i < cf.length; i++) {
+    if (!cf[i]) continue;
+    const { bar, barColor, ...rest } = JSON.parse(cf[i]) as CellStyle & { bar?: number; barColor?: string };
+    styles[i] = { ...styles[i], ...rest };
+    if (bar !== undefined && barColor) bars[i] = { len: bar, color: barColor };
+  }
   const at = (r: number, c: number) => (r - r0) * nCols + (c - c0);
   const visRows = rows.visibleLines(r0, pane.rows.last);
   const visCols = cols.visibleLines(c0, pane.cols.last);
@@ -137,6 +165,29 @@ function paintCells(ctx: CanvasRenderingContext2D, p: PaintInput, pane: Pane) {
       if (covered[i] || !styles[i].fill) continue;
       ctx.fillStyle = styles[i].fill!;
       ctx.fillRect(x(c), y(r), cols.width(c), rows.height(r));
+    }
+  }
+
+  // Data bars: a gradient from the bar colour, as in Excel's default gradient fill.
+  if (bars.length) {
+    for (const r of visRows) {
+      for (const c of visCols) {
+        const bar = bars[at(r, c)];
+        if (!bar || covered[at(r, c)]) continue;
+        const bx = x(c) + 2;
+        const by = y(r) + 2;
+        const bw = Math.max(0, (cols.width(c) - 5) * bar.len);
+        const bh = rows.height(r) - 5;
+        if (bw <= 0 || bh <= 0) continue;
+        const grad = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+        grad.addColorStop(0, bar.color);
+        grad.addColorStop(1, bar.color + "33");
+        ctx.fillStyle = grad;
+        ctx.fillRect(bx, by, bw, bh);
+        ctx.strokeStyle = bar.color;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+      }
     }
   }
 
@@ -207,6 +258,80 @@ function paintCells(ctx: CanvasRenderingContext2D, p: PaintInput, pane: Pane) {
   for (const m of merged) {
     if (m.style.border) drawBorders(ctx, m.px, m.style.border, m.style.fill ?? theme.background);
   }
+
+  // AutoFilter dropdown buttons on the header row.
+  const f = p.filter;
+  if (f && f.range.top >= r0 && f.range.top <= block.bottom && !rows.isHidden(f.range.top)) {
+    const r = f.range.top;
+    for (const c of visCols) {
+      if (c < f.range.left || c > f.range.right) continue;
+      // A merged header gets one button, at its right edge.
+      const area = merges.cellRect({ row: r, col: c });
+      const merged = area.left !== area.right || area.top !== area.bottom;
+      if (merged && c !== Math.min(area.right, f.range.right)) continue;
+      const cell = merged ? rect(area) : { x: x(c), y: y(r), w: cols.width(c), h: rows.height(r) };
+      drawFilterButton(ctx, filterButtonBox(cell), f.columns.has(c), f.sort?.col === c ? f.sort.ascending : null);
+    }
+  }
+}
+
+/** Excel's filter button: a small raised box with a dropdown arrow, a funnel when filtering, an arrow when sorted. */
+function drawFilterButton(ctx: CanvasRenderingContext2D, b: { x: number; y: number; size: number }, filtering: boolean, sorted: boolean | null) {
+  const { x, y, size } = b;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(x, y, size, size);
+  ctx.strokeStyle = "#a6a6a6";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
+  ctx.fillStyle = filtering ? theme.filtered : "#444444";
+  const cx = x + size / 2;
+  const cy = y + size / 2;
+  if (filtering) {
+    // Funnel on the left, small arrow on the right.
+    ctx.beginPath();
+    ctx.moveTo(x + 3, y + 4);
+    ctx.lineTo(x + 10, y + 4);
+    ctx.lineTo(x + 7.5, y + 8);
+    ctx.lineTo(x + 7.5, y + 12);
+    ctx.lineTo(x + 5.5, y + 11);
+    ctx.lineTo(x + 5.5, y + 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(x + size - 6, cy);
+    ctx.lineTo(x + size - 2.5, cy);
+    ctx.lineTo(x + size - 4.25, cy + 2.5);
+    ctx.closePath();
+    ctx.fill();
+  } else if (sorted !== null) {
+    // Sort arrow next to the dropdown arrow.
+    ctx.fillRect(x + 4, y + 4, 1, size - 8);
+    ctx.beginPath();
+    if (sorted) {
+      ctx.moveTo(x + 2.5, y + size - 6);
+      ctx.lineTo(x + 6.5, y + size - 6);
+      ctx.lineTo(x + 4.5, y + size - 3.5);
+    } else {
+      ctx.moveTo(x + 2.5, y + 6);
+      ctx.lineTo(x + 6.5, y + 6);
+      ctx.lineTo(x + 4.5, y + 3.5);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(x + size - 8, cy - 1);
+    ctx.lineTo(x + size - 3, cy - 1);
+    ctx.lineTo(x + size - 5.5, cy + 2);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(cx - 3.5, cy - 1.5);
+    ctx.lineTo(cx + 3.5, cy - 1.5);
+    ctx.lineTo(cx, cy + 2.5);
+    ctx.closePath();
+    ctx.fill();
+  }
 }
 
 function paintOverlays(ctx: CanvasRenderingContext2D, p: PaintInput, pane: Pane) {
@@ -233,6 +358,19 @@ function paintOverlays(ctx: CanvasRenderingContext2D, p: PaintInput, pane: Pane)
     ctx.lineWidth = 2;
     ctx.strokeRect(px.x + 1, px.y + 1, px.w - 1, px.h - 1);
   });
+
+  // Circle Invalid Data: red ellipses around cells that break their rule.
+  if (p.circles.length) {
+    ctx.strokeStyle = theme.invalidCircle;
+    ctx.lineWidth = 1.5;
+    for (const cell of p.circles) {
+      const px = rect(geo.merges.cellRect(cell));
+      if (px.w <= 0 || px.h <= 0) continue;
+      ctx.beginPath();
+      ctx.ellipse(px.x + px.w / 2, px.y + px.h / 2, px.w / 2 + 3, px.h / 2 + 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
 
   ctx.strokeStyle = theme.selectionBorder;
   ctx.lineWidth = 2;
@@ -267,6 +405,9 @@ function paintHeaders(ctx: CanvasRenderingContext2D, p: PaintInput, panes: Panes
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   const headerText = (inSel: boolean) => (inSel ? theme.headerActiveText : theme.headerText);
+  // Excel shows the row numbers of a filtered list in blue.
+  const f = p.filter;
+  const filteredRow = (row: number) => !!f && f.columns.size > 0 && row > f.range.top && row <= f.range.bottom;
 
   for (const band of panes.colBands()) {
     ctx.save();
@@ -308,7 +449,7 @@ function paintHeaders(ctx: CanvasRenderingContext2D, p: PaintInput, panes: Panes
         ctx.fillStyle = theme.headerActiveLine;
         ctx.fillRect(HEADER_WIDTH - 2, y, 2, h);
       }
-      ctx.fillStyle = headerText(inSel);
+      ctx.fillStyle = filteredRow(row) && !inSel ? theme.filtered : headerText(inSel);
       ctx.fillText(String(row + 1), HEADER_WIDTH / 2, y + h / 2);
       const hiddenNext = row + 1 < MAX_ROWS && rows.isHidden(row + 1);
       ctx.fillStyle = hiddenNext ? theme.hiddenMarker : theme.headerBorder;

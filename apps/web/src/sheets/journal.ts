@@ -12,7 +12,18 @@ import type { SheetsDocument } from "@office/engine";
 import { readJournal, writeJournal } from "../documents";
 
 const READ_ONLY = new Set([
+  "autoFilter",
   "canSort",
+  "cfBlock",
+  "cfRules",
+  "checkInput",
+  "currentRegion",
+  "filterColumn",
+  "filterCounts",
+  "filterItems",
+  "invalidCells",
+  "listItems",
+  "validationAt",
   "columnWidths",
   "displayBlock",
   "extent",

@@ -42,6 +42,19 @@ call the same Rust crates natively instead of through WebAssembly.
    the engine for `displayBlock` / `kindBlock` / `styleBlock` of the viewport
    (`apps/web/src/sheets/paint.ts`).
 
+## Data tools
+
+AutoFilter (`filter.rs`), Data Validation (`validation.rs`) and Conditional
+Formatting (`conditional_format.rs`) live in `Sheet::data_tools()` and are
+changed as a whole with `SetDataTools`. A filter hides rows only when it is
+applied (as in Excel); those rows join the user's hidden rows in
+`Sheet::is_row_hidden`, so `SUBTOTAL`, the grid and the row layout all see
+them. Conditional formats are evaluated per painted block (`cfBlock`); the
+range statistics they need (ranks, averages, duplicates) are computed once per
+change and cached in `crates/wasm`. The UI is in
+`apps/web/src/sheets/features/dataTools.tsx`; `.xlsx` reading and writing in
+`crates/formats/src/xlsx_data_tools.rs`, within the single worksheet pass.
+
 ## Kinds of edits
 
 | Edit | Engine op | Undo |
@@ -51,6 +64,8 @@ call the same Rust crates natively instead of through WebAssembly.
 | Fill handle, paste within Office | `Batch(SetCells, SetStyles)` | both |
 | Column width | `SetColWidths` | previous widths |
 | Insert/delete rows or columns, sort | `ReplaceSheet` (formulas rewritten by `formula/refs.rs`) | the old sheet |
+| Filter, data validation, conditional formatting | `SetDataTools` (`data_tools.rs`) | previous settings |
+| Remove duplicates, custom sort, sort from a filter | `ReplaceSheet` | the old sheet |
 | Add/rename/delete sheet | `InsertSheet`, `RenameSheet`, `RemoveSheet` | the inverse op |
 
 ## Design rules

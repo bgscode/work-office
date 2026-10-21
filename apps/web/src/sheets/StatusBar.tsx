@@ -15,16 +15,19 @@ interface Props {
   /** Selection limited to cells with data, or null. */
   rect: Rect | null;
   mode: StatusMode;
+  /** Shown after the mode, e.g. "4 of 10 records found" while a filter is on. */
+  note?: string;
   zoom: number;
   onZoom: (zoom: number) => void;
 }
 
-export function StatusBar({ doc, sheet, rect, mode, zoom, onZoom }: Props) {
+export function StatusBar({ doc, sheet, rect, mode, note, zoom, onZoom }: Props) {
   return (
     <div className="status-bar" role="status" aria-label="Status bar">
       <span className="status-mode" aria-label={`Mode: ${mode}`}>
         {mode}
       </span>
+      {note && <span className="status-note">{note}</span>}
       <span className="status-spacer" />
       <SelectionStats doc={doc} sheet={sheet} rect={rect} />
       <ZoomControl zoom={zoom} onZoom={onZoom} />

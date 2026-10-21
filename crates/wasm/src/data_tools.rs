@@ -327,7 +327,22 @@ impl SheetsDocument {
             return Vec::new();
         }
         let block = Range::new(CellRef::new(row, col), CellRef::new(row + rows - 1, col + cols - 1));
-        conditional_format::evaluate(s, block).into_iter().map(|r| r.map_or(String::new(), |r| r.to_json())).collect()
+        // Range statistics are worked out once per change, not on every paint.
+        let prepared = {
+            let mut cache = self.cf_cache.borrow_mut();
+            match &*cache {
+                Some((sh, generation, p)) if *sh == sheet && *generation == self.generation => p.clone(),
+                _ => {
+                    let p = std::rc::Rc::new(conditional_format::prepare(s));
+                    *cache = Some((sheet, self.generation, p.clone()));
+                    p
+                }
+            }
+        };
+        conditional_format::evaluate_prepared(s, &prepared, block)
+            .into_iter()
+            .map(|r| r.map_or(String::new(), |r| r.to_json()))
+            .collect()
     }
 
     // ------------------------------------------------------------ Remove Duplicates, Sort

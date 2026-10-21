@@ -40,7 +40,7 @@ When you finish an item, update its row in the same pull request.
 
 | Feature | Status | Priority | Milestone |
 |---|---|---|---|
-| Arrows, Shift+arrows, Page Up/Down, Home, Tab/Enter | ✅ | P1 | – |
+| Arrows, Shift+arrows, Page Up/Down, Home, Tab/Enter (Enter after Tabs returns to the first column, like Excel) | ✅ | P1 | – |
 | Click/drag select; whole row/column/sheet select | ✅ | P1 | – |
 | Ctrl+arrow (jump to edge of data), Ctrl+Shift+arrow (select to edge) | ✅ | P1 | M1 |
 | Ctrl+Home / Ctrl+End | ✅ | P1 | M1 |
@@ -66,8 +66,9 @@ When you finish an item, update its row in the same pull request.
 | Row height: drag, double-click to autofit, Row Height dialog (points); automatic height for big fonts and wrapped text | ✅ | P1 | M2 |
 | Hide / unhide rows and columns | ✅ | P1 | M2 |
 | Format Painter (click once, double-click to keep painting, Esc to stop) | ✅ | P1 | M2 |
-| Conditional formatting: highlight rules (>, <, between, equal, text contains, duplicates) | ⬜ | P1 | M4 |
-| Conditional formatting: colour scales, data bars, icon sets | ⬜ | P2 | – |
+| Conditional formatting: highlight rules (>, <, between, equal, text contains, date occurring, duplicates, top/bottom, above/below average, formula), Manage Rules | ✅ | P1 | M4 |
+| Conditional formatting: colour scales, data bars | ✅ | P2 | M4 |
+| Conditional formatting: icon sets, custom format picker | ⬜ | P2 | – |
 | Format as Table (banded rows, header style) | ⬜ | P2 | – |
 | Custom number format codes (`0.0"kg"`, `[Red]`…) | ⬜ | P2 | – |
 | Accounting, fraction, scientific formats | ⬜ | P2 | – |
@@ -101,9 +102,10 @@ When you finish an item, update its row in the same pull request.
 |---|---|---|---|
 | Sort by one column, A→Z / Z→A | ✅ | P1 | – |
 | Freeze panes (top row, first column, at selection) | ✅ | P1 | M4 |
-| Filter (AutoFilter dropdowns: by value, text/number conditions, sort from header) | ⬜ | P1 | M4 |
-| Data validation: dropdown lists, number/date limits, error message | ⬜ | P1 | M4 |
-| Remove duplicates | ⬜ | P1 | M4 |
+| Filter (AutoFilter dropdowns: by value with search, text/number conditions, top 10, above/below average, sort from header, Ctrl+Shift+L, Clear/Reapply, "N of M records found") | ✅ | P1 | M4 |
+| Data validation: dropdown lists (Alt+↓), number/date/time/text-length limits, custom formula, input message, Stop/Warning/Information alerts, Circle Invalid Data | ✅ | P1 | M4 |
+| Remove duplicates | ✅ | P1 | M4 |
+| Custom Sort dialog (several levels, headers) | ✅ | P1 | M4 |
 | Sort by several columns, sort with header row option | ⬜ | P2 | – |
 | Text to Columns | ⬜ | P2 | – |
 | Pivot tables | ⬜ | P2 | – |

@@ -30,6 +30,30 @@ import {
 } from "./geometry";
 import { alignmentCommands, bordersCommand, fontCommands, painterCommand, type BorderLineChoice, type FormattingContext, type PainterMode } from "./features/formatting";
 import { SizeDialog, formatMenuItems, freezeCommand, mergeCommand, type Axis, type LayoutContext, type MergeKind } from "./features/layout";
+import {
+  CfGalleryDialog,
+  CfManageDialog,
+  CfRuleDialog,
+  CustomFilterDialog,
+  FilterMenu,
+  ListDropdown,
+  MessageDialog,
+  RemoveDuplicatesDialog,
+  SortDialog,
+  Top10Dialog,
+  ValidationAlert,
+  ValidationDialog,
+  conditionalFormattingCommand,
+  dataTabCommands,
+  readFilter,
+  readValidation,
+  sortFilterMenuItems,
+  tableArea,
+  type AlertChoice,
+  type DataContext,
+  type DataDialog,
+  type ValidationRule,
+} from "./features/dataTools";
 import { navigate } from "./merges";
 import { buildGeometry } from "./sheetGeometry";
 import { Grid, fillArea, type FillDirection, type GridShortcut } from "./Grid";
@@ -114,12 +138,32 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
   const [savedRevision, setSavedRevision] = useState(0);
   const [saveFailed, setSaveFailed] = useState(false);
   const changed = () => setRevision((r) => r + 1);
+  // Data tools: open dialog, filter dropdown, in-cell list, Circle Invalid Data, messages.
+  const [dataDialog, setDataDialog] = useState<DataDialog | null>(null);
+  const [filterMenu, setFilterMenu] = useState<{ col: number; x: number; y: number } | null>(null);
+  const [listMenu, setListMenu] = useState<{ x: number; y: number; width: number } | null>(null);
+  const [circlesOn, setCirclesOn] = useState(false);
+  const [message, setMessage] = useState<{ title: string; message: string } | null>(null);
+  /** An entry that broke a validation rule, waiting for the user's answer. */
+  const [alertFor, setAlertFor] = useState<{ rule: ValidationRule; dRow: number; dCol: number } | null>(null);
 
   const { row, col } = selection.anchor;
   const sel = selectionRect(selection);
   const activeStyle = parseStyle(doc.styleBlock(sheet, row, col, 1, 1)[0]);
   // Row heights (incl. automatic ones), column widths, hidden lines, merges, frozen panes.
   const geo = useMemo(() => buildGeometry(doc, sheet), [doc, sheet, revision]);
+  const filter = useMemo(() => readFilter(doc, sheet), [doc, sheet, revision]);
+  const circles = useMemo(() => {
+    if (!circlesOn) return [];
+    const flat = doc.invalidCells(sheet, 0, 0, MAX_ROWS - 1, MAX_COLS - 1);
+    const out: Cell[] = [];
+    for (let i = 0; i < flat.length; i += 2) out.push({ row: flat[i], col: flat[i + 1] });
+    return out;
+  }, [doc, sheet, revision, circlesOn]);
+  const activeRule = readValidation(doc.validationAt(sheet, row, col));
+  const listItems = activeRule?.kind === "list" && activeRule.dropdown ? doc.listItems(sheet, row, col) : [];
+  const inputMessage =
+    activeRule?.showInput && (activeRule.inputTitle || activeRule.inputMessage) ? { title: activeRule.inputTitle, message: activeRule.inputMessage } : null;
 
   /** Select and scroll into view. */
   /**
@@ -239,13 +283,22 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
     setAssistIndex(0);
   }
 
-  function commit(dRow: number, dCol: number) {
+  /** Where a run of Tab-committed entries started (see commit). */
+  const tabStart = useRef<Cell | null>(null);
+
+  /** `force`: the user already accepted an entry that breaks a Warning/Information rule. */
+  function commit(dRow: number, dCol: number, force = false) {
     if (!editing) return;
     // The entry goes where the edit started, even if another sheet is showing.
     const target = editing.sheet;
     const { row: r, col: c } = editing.cell;
     const value = closeParens(editing.draft);
     if (value !== doc.input(target, r, c)) {
+      const broken = force ? null : readValidation(doc.checkInput(target, r, c, value));
+      if (broken) {
+        setAlertFor({ rule: broken, dRow, dCol });
+        return;
+      }
       // A line break (Alt+Enter) turns on Wrap Text in the same undo step, like Excel.
       const wrapped = !!parseStyle(doc.styleBlock(target, r, c, 1, 1)[0]).wrap;
       if (value.includes("\n") && !wrapped) doc.setInputWrapped(target, r, c, value);
@@ -254,9 +307,14 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       changed();
     }
     setEditing(null);
+    // Excel: Enter after a run of Tab entries goes to the next row of the column where the run started.
+    const start = tabStart.current;
+    tabStart.current = dCol !== 0 && dRow === 0 ? (start?.row === r ? start : { row: r, col: c }) : null;
     if (target !== sheet) {
       setSheet(target);
       setSelection(single(editing.cell));
+    } else if (dRow === 1 && dCol === 0 && start?.row === r && selection.anchor.row === r) {
+      setSelection(single({ row: geo.rows.nextVisible(r + 1, 1) ?? r + 1, col: start.col }));
     } else if (dRow || dCol) {
       setSelection(navigate(selection, dRow, dCol, false, geo));
     }
@@ -710,6 +768,124 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
     changed();
   }
 
+  // ---- data tools: filter, sort, remove duplicates, validation, conditional formatting
+
+  function toggleFilter() {
+    const area = tableArea(doc, sheet, sel);
+    doc.toggleFilter(sheet, area.top, area.left, area.bottom, area.right);
+    setFilterMenu(null);
+    changed();
+  }
+
+  function answerAlert(choice: AlertChoice) {
+    const pending = alertFor;
+    setAlertFor(null);
+    if (!pending) return;
+    if (choice === "accept") commit(pending.dRow, pending.dCol, true);
+    else if (choice === "cancel") setEditing(null);
+    else {
+      // Retry: back to the entry with its text selected, like Excel.
+      requestAnimationFrame(() => {
+        const el = editing?.source === "bar" ? barInputRef.current : cellInputRef.current;
+        el?.focus({ preventScroll: true });
+        el?.select();
+      });
+    }
+  }
+
+  /** Alt+Down: the active cell's list, or its column's filter dropdown. */
+  function openDropdown() {
+    const box = cellInputRef.current?.getBoundingClientRect();
+    if (!box) return;
+    if (listItems.length) setListMenu({ x: box.left, y: box.bottom + 1, width: box.width });
+    else if (filter && row === filter.range.top && col >= filter.range.left && col <= filter.range.right)
+      setFilterMenu({ col, x: box.left, y: box.bottom + 1 });
+  }
+
+  function pickFromList(item: string) {
+    setListMenu(null);
+    doc.setInputs(sheet, Uint32Array.of(row), Uint32Array.of(col), [item]);
+    changed();
+    cellInputRef.current?.focus({ preventScroll: true });
+  }
+
+  const dataCtx: DataContext = {
+    filter,
+    toggleFilter,
+    clearFilters() {
+      doc.clearFilters(sheet);
+      changed();
+    },
+    reapplyFilter() {
+      doc.reapplyFilter(sheet);
+      changed();
+    },
+    sort,
+    openDialog: setDataDialog,
+    clearCf(whole: boolean) {
+      doc.clearCfRules(sheet, whole, sel.top, sel.left, sel.bottom, sel.right);
+      changed();
+    },
+    circles: circlesOn,
+    setCircles: setCirclesOn,
+  };
+
+  const filterCounts = filter ? doc.filterCounts(sheet) : null;
+  const filterStatus = filterCounts && filterCounts.length === 2 ? `${filterCounts[0]} of ${filterCounts[1]} records found` : "";
+
+  function closeDataDialog() {
+    setDataDialog(null);
+    cellInputRef.current?.focus({ preventScroll: true });
+  }
+
+  function renderDataDialog() {
+    const d = dataDialog;
+    if (!d) return null;
+    const close = closeDataDialog;
+    switch (d.kind) {
+      case "sort":
+        return (
+          <SortDialog
+            doc={doc}
+            sheet={sheet}
+            sel={sel}
+            activeCol={col}
+            onDone={(area) => {
+              changed();
+              setSelection({ anchor: { row: area.top, col: area.left }, focus: { row: area.bottom, col: area.right } });
+            }}
+            onClose={close}
+          />
+        );
+      case "dedupe":
+        return (
+          <RemoveDuplicatesDialog
+            doc={doc}
+            sheet={sheet}
+            sel={sel}
+            onDone={(area, text) => {
+              changed();
+              setSelection({ anchor: { row: area.top, col: area.left }, focus: { row: area.bottom, col: area.right } });
+              setMessage({ title: "Remove Duplicates", message: text });
+            }}
+            onClose={close}
+          />
+        );
+      case "validation":
+        return <ValidationDialog doc={doc} sheet={sheet} sel={sel} active={selection.anchor} onDone={changed} onClose={close} />;
+      case "customFilter":
+        return filter && <CustomFilterDialog doc={doc} sheet={sheet} filter={filter} col={d.col} preset={d.preset} onDone={changed} onClose={close} />;
+      case "top10":
+        return <Top10Dialog doc={doc} sheet={sheet} col={d.col} onDone={changed} onClose={close} />;
+      case "cf":
+        return <CfRuleDialog doc={doc} sheet={sheet} sel={sel} rule={d.rule} onDone={changed} onClose={close} />;
+      case "cfGallery":
+        return <CfGalleryDialog doc={doc} sheet={sheet} sel={sel} gallery={d.gallery} onDone={changed} onClose={close} />;
+      case "cfManage":
+        return <CfManageDialog doc={doc} sheet={sheet} onDone={changed} onClose={close} />;
+    }
+  }
+
   // ---- find
 
   function find(query: string, forward: boolean, opts: FindOptions): boolean {
@@ -751,6 +927,8 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       },
       fillDown: () => fillWithin("down"),
       fillRight: () => fillWithin("right"),
+      filter: toggleFilter,
+      dropdown: openDropdown,
     };
     actions[s]();
   }
@@ -1037,6 +1215,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
         { id: "fmt-comma", label: "Comma Style", title: "Format with a thousands separator (1,234.50).", icon: "comma", group: "Number", active: formatKind === "number", onRun: () => format("format", "number") },
         { id: "dec-more", label: "Increase Decimal", title: "Show more decimal places for a more precise value.", icon: "decimalIncrease", group: "Number", separatorBefore: true, onRun: () => format("decimals", "1") },
         { id: "dec-less", label: "Decrease Decimal", title: "Show fewer decimal places.", icon: "decimalDecrease", group: "Number", onRun: () => format("decimals", "-1") },
+        conditionalFormattingCommand(dataCtx),
         {
           id: "cells-insert",
           label: "Insert",
@@ -1098,6 +1277,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
           menu: [
             { id: "sort-asc", label: "Sort A to Z", icon: "sortAsc", onRun: () => sort(true) },
             { id: "sort-desc", label: "Sort Z to A", icon: "sortDesc", onRun: () => sort(false) },
+            ...sortFilterMenuItems(dataCtx),
           ],
         },
         {
@@ -1147,10 +1327,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
     {
       id: "data",
       label: "Data",
-      commands: [
-        { id: "sort-asc", label: "Sort A to Z", title: "Sort by the active column, lowest to highest.", icon: "sortAsc", size: "small", group: "Sort & Filter", onRun: () => sort(true) },
-        { id: "sort-desc", label: "Sort Z to A", title: "Sort by the active column, highest to lowest.", icon: "sortDesc", size: "small", group: "Sort & Filter", onRun: () => sort(false) },
-      ],
+      commands: dataTabCommands(dataCtx),
     },
     {
       id: "view",
@@ -1251,6 +1428,22 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
           onAutofit={autofit}
           onContextMenu={cellMenu}
           onShortcut={shortcut}
+          filter={filter}
+          onFilterButton={(c, x, y) => setFilterMenu((m) => (m?.col === c ? null : { col: c, x, y }))}
+          circles={circles}
+          listArrow={listItems.length > 0}
+          onListArrow={(x, y, width) => setListMenu((m) => (m ? null : { x, y, width }))}
+          inputMessage={inputMessage}
+          onTabMove={() => {
+            if (tabStart.current?.row !== row) tabStart.current = { row, col };
+          }}
+          onEnterAfterTabs={() => {
+            const start = tabStart.current;
+            tabStart.current = null;
+            if (start?.row !== row) return false;
+            goTo(single({ row: geo.rows.nextVisible(row + 1, 1) ?? row + 1, col: start.col }));
+            return true;
+          }}
         />
         {findMode && (
           <FindBar
@@ -1291,7 +1484,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
           renaming={renamingTab}
           setRenaming={setRenamingTab}
         />
-        <StatusBar doc={doc} sheet={sheet} rect={dataRect()} mode={statusMode(editing, pointMode)} zoom={zoom} onZoom={setZoom} />
+        <StatusBar doc={doc} sheet={sheet} rect={dataRect()} mode={statusMode(editing, pointMode)} note={filterStatus} zoom={zoom} onZoom={setZoom} />
       </footer>
       <FormulaAssist
         anchor={activeInput?.getBoundingClientRect() ?? null}
@@ -1319,6 +1512,39 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
         />
       )}
       {insertFunctionOpen && <InsertFunctionDialog onInsert={closeInsertFunction} onClose={() => closeInsertFunction(null)} />}
+      {renderDataDialog()}
+      {filterMenu && filter && (
+        <FilterMenu
+          key={`${sheet}:${filterMenu.col}`}
+          doc={doc}
+          sheet={sheet}
+          filter={filter}
+          col={filterMenu.col}
+          x={filterMenu.x}
+          y={filterMenu.y}
+          onClose={() => {
+            setFilterMenu(null);
+            cellInputRef.current?.focus({ preventScroll: true });
+          }}
+          onChanged={changed}
+          openDialog={setDataDialog}
+        />
+      )}
+      {listMenu && listItems.length > 0 && (
+        <ListDropdown
+          items={listItems}
+          x={listMenu.x}
+          y={listMenu.y}
+          minWidth={listMenu.width}
+          onPick={pickFromList}
+          onClose={() => {
+            setListMenu(null);
+            cellInputRef.current?.focus({ preventScroll: true });
+          }}
+        />
+      )}
+      {alertFor && <ValidationAlert rule={alertFor.rule} onChoice={answerAlert} />}
+      {message && <MessageDialog title={message.title} message={message.message} onClose={() => setMessage(null)} />}
     </div>
   );
 }

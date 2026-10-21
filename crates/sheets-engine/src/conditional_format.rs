@@ -504,12 +504,21 @@ impl CfResult {
 struct Stats {
     /// Numbers in the range, ascending.
     numbers: Vec<f64>,
+    /// Their average (Above/Below Average rules).
+    mean: f64,
     /// Lower-cased displayed text -> how many cells show it.
     counts: HashMap<String, u32>,
 }
 
 fn stats(sheet: &Sheet, rule: &CfRule) -> Stats {
     let mut s = Stats::default();
+    // Rules that only look at their own cell need nothing from the range.
+    if matches!(
+        rule.kind,
+        CfKind::CellIs { .. } | CfKind::Text { .. } | CfKind::TimePeriod(_) | CfKind::Expression { .. }
+    ) {
+        return s;
+    }
     let need_counts = matches!(rule.kind, CfKind::Duplicates { .. });
     for r in &rule.ranges {
         // Only cells that hold something matter; avoid walking huge empty areas.
@@ -530,7 +539,21 @@ fn stats(sheet: &Sheet, rule: &CfRule) -> Stats {
         }
     }
     s.numbers.sort_by(f64::total_cmp);
+    if !s.numbers.is_empty() {
+        s.mean = s.numbers.iter().sum::<f64>() / s.numbers.len() as f64;
+    }
     s
+}
+
+/// Per-rule statistics over each rule's whole range (ranks, averages,
+/// duplicates, scale bounds), computed once and reused for every block the
+/// grid paints until the sheet changes. See [`evaluate_prepared`].
+pub struct CfPrepared {
+    stats: Vec<Stats>,
+}
+
+pub fn prepare(sheet: &Sheet) -> CfPrepared {
+    CfPrepared { stats: sheet.data_tools().cond_formats.iter().map(|r| stats(sheet, r)).collect() }
 }
 
 fn lerp_color(a: &str, b: &str, t: f64) -> String {
@@ -609,7 +632,7 @@ fn matches(sheet: &Sheet, rule: &CfRule, st: &Stats, at: CellRef, today: f64) ->
             if st.numbers.is_empty() {
                 return false;
             }
-            let mean = st.numbers.iter().sum::<f64>() / st.numbers.len() as f64;
+            let mean = st.mean;
             match (below, equal) {
                 (false, false) => *x > mean,
                 (false, true) => *x >= mean,
@@ -624,6 +647,11 @@ fn matches(sheet: &Sheet, rule: &CfRule, st: &Stats, at: CellRef, today: f64) ->
 
 /// Conditional formatting for every cell of `block`, row-major; `None` where no rule applies.
 pub fn evaluate(sheet: &Sheet, block: Range) -> Vec<Option<CfResult>> {
+    evaluate_prepared(sheet, &prepare(sheet), block)
+}
+
+/// [`evaluate`] with statistics from [`prepare`] on the same, unchanged sheet.
+pub fn evaluate_prepared(sheet: &Sheet, prepared: &CfPrepared, block: Range) -> Vec<Option<CfResult>> {
     let width = block.cols() as usize;
     let mut out: Vec<Option<CfResult>> = vec![None; block.rows() as usize * width];
     let mut stopped = vec![false; out.len()];
@@ -632,11 +660,10 @@ pub fn evaluate(sheet: &Sheet, block: Range) -> Vec<Option<CfResult>> {
         return out;
     }
     let today = date::now_serial();
-    for rule in rules {
+    for (rule, st) in rules.iter().zip(&prepared.stats) {
         if !rule.ranges.iter().any(|r| data_tools::intersects(r, &block)) {
             continue;
         }
-        let st = stats(sheet, rule);
         for r in rule.ranges.iter().filter(|r| data_tools::intersects(r, &block)) {
             let (top, bottom) = (r.start.row.max(block.start.row), r.end.row.min(block.end.row));
             let (left, right) = (r.start.col.max(block.start.col), r.end.col.min(block.end.col));
@@ -644,7 +671,7 @@ pub fn evaluate(sheet: &Sheet, block: Range) -> Vec<Option<CfResult>> {
                 for col in left..=right {
                     let i = (row - block.start.row) as usize * width + (col - block.start.col) as usize;
                     let at = CellRef::new(row, col);
-                    if stopped[i] || !matches(sheet, rule, &st, at, today) {
+                    if stopped[i] || !matches(sheet, rule, st, at, today) {
                         continue;
                     }
                     let slot = out[i].get_or_insert_with(CfResult::default);

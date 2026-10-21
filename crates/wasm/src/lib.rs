@@ -55,6 +55,10 @@ pub struct SheetsDocument {
     clip: Option<Clip>,
     /// Formatting picked up by Format Painter.
     painter: Option<StyleSnapshot>,
+    /// Bumped by every change, so caches know when they are stale.
+    generation: u64,
+    /// Conditional-format statistics for (sheet, generation); see `cfBlock`.
+    cf_cache: std::cell::RefCell<Option<(usize, u64, std::rc::Rc<sheets_engine::conditional_format::CfPrepared>)>>,
 }
 
 impl Default for SheetsDocument {
@@ -68,7 +72,14 @@ impl SheetsDocument {
         // Native builds (tests) keep the engine's system clock.
         #[cfg(target_arch = "wasm32")]
         sheets_engine::date::set_clock(local_now_ms);
-        SheetsDocument { book, history: History::default(), clip: None, painter: None }
+        SheetsDocument {
+            book,
+            history: History::default(),
+            clip: None,
+            painter: None,
+            generation: 0,
+            cf_cache: Default::default(),
+        }
     }
 
     fn sheet(&self, sheet: usize) -> &Sheet {
@@ -77,6 +88,7 @@ impl SheetsDocument {
 
     fn apply(&mut self, op: impl Op<Workbook> + 'static) {
         self.history.apply(&mut self.book, Box::new(op));
+        self.generation += 1;
     }
 }
 
@@ -186,10 +198,12 @@ impl SheetsDocument {
     }
 
     pub fn undo(&mut self) -> bool {
+        self.generation += 1;
         self.history.undo(&mut self.book)
     }
 
     pub fn redo(&mut self) -> bool {
+        self.generation += 1;
         self.history.redo(&mut self.book)
     }
 
