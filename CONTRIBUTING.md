@@ -10,7 +10,7 @@ clone to merged pull request.
 3. Install Node.js 20+ and [pnpm](https://pnpm.io/installation) 10.
 4. `pnpm install`, then `pnpm dev` and open http://localhost:5173.
 
-After you change Rust code, re-run `pnpm build:wasm` (or restart `pnpm dev`) so the browser picks it up.
+After you change Rust code, re-run `pnpm build:wasm` (or restart `pnpm dev`) so the browser picks it up. `pnpm dev` uses an optimised engine build; `pnpm dev:debug` builds it with debug info (much slower). Performance work: see [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ## Where things live
 
@@ -60,12 +60,24 @@ Sheets UI files in `apps/web/src/sheets/`:
 | `SheetsApp.tsx` | All UI state; turns actions into engine calls; ribbon, menus, autocomplete logic |
 | `Grid.tsx` | Mouse and keyboard on the grid: selection, point mode, fill handle, column resize |
 | `paint.ts` | Draws the visible cells, styles, highlights and headers on the canvas |
-| `layout.ts` | Column positions with custom widths |
+| `layout.ts` | Row/column positions with custom sizes and hidden lines (fast for 1M rows) |
+| `sheetGeometry.ts` | Builds the geometry from the engine, incl. automatic row heights |
+| `panes.ts`, `merges.ts` | Frozen panes; merged cells and Excel-style navigation |
 | `formulaText.ts` | Reading formula text: references, word at caret, enclosing function |
 | `geometry.ts`, `clipboard.ts` | Selection maths, tab-separated clipboard text |
 | `FormulaBar`, `FormulaAssist`, `ContextMenu`, `FindBar`, `SheetTabs` | Smaller components |
 
 Pure helpers have Vitest tests next to them (`*.test.ts`).
+
+### Add a ribbon command
+
+Commands are plain data (`RibbonCommand` in `packages/ui/src/Ribbon.tsx`):
+`{ id, label, onRun, group, icon, size, shortcut, title, active, menu, render }`.
+Put them in the Excel tab and group where Excel has them — groups in use:
+Clipboard, Font, Alignment, Number, Styles, Cells, Editing, Sort & Filter,
+Data Tools, Charts, Function Library, Window, Zoom, Print. Icons are inline SVGs
+in `packages/ui/src/icons.tsx` (16×16 grid). App chrome styles live in
+`apps/web/src/excel.css`; grid colours in `apps/web/src/sheets/paint.ts`.
 
 ## Before you open a pull request
 

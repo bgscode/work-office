@@ -12,7 +12,8 @@ use sheets_engine::filter::{AutoFilter, ColumnFilter, CompareOp, Condition};
 use sheets_engine::validation::{ErrorStyle, Validation, ValidationKind, ValidationOp};
 use sheets_engine::{CellRef, Range, Sheet};
 
-use super::{attr, escape, walk, StyleTable, XmlEvent};
+use super::{escape, StyleTable};
+use crate::xml::{attr, walk, XmlEvent};
 
 // ---------------------------------------------------------------- reading
 
@@ -30,16 +31,16 @@ pub(super) fn read_dxfs(xml: &str) -> Vec<CfFormat> {
         XmlEvent::End { name: "fill" } => in_fill = false,
         XmlEvent::Start { name, attrs } if in_dxfs => {
             let Some(f) = out.last_mut() else { return };
-            let on = || Some(attr(attrs, "val") != "0" && attr(attrs, "val") != "false");
+            let on = || Some(!matches!(&*attr(attrs, "val"), "0" | "false"));
             match *name {
                 "b" if in_font => f.bold = on(),
                 "i" if in_font => f.italic = on(),
                 "strike" if in_font => f.strike = on(),
                 "u" if in_font => f.underline = Some(attr(attrs, "val") != "none"),
-                "color" if in_font => f.color = rgb(attr(attrs, "rgb")),
+                "color" if in_font => f.color = rgb(&attr(attrs, "rgb")),
                 // Solid dxf fills keep their colour in bgColor; fgColor is a fallback.
-                "bgColor" if in_fill => f.fill = rgb(attr(attrs, "rgb")).or(f.fill.take()),
-                "fgColor" if in_fill && f.fill.is_none() => f.fill = rgb(attr(attrs, "rgb")),
+                "bgColor" if in_fill => f.fill = rgb(&attr(attrs, "rgb")).or(f.fill.take()),
+                "fgColor" if in_fill && f.fill.is_none() => f.fill = rgb(&attr(attrs, "rgb")),
                 _ => {}
             }
         }
@@ -60,161 +61,184 @@ pub(super) struct SheetTools {
     pub cond_formats: Vec<CfRule>,
 }
 
-pub(super) fn read_sheet(xml: &str, dxfs: &[CfFormat]) -> SheetTools {
-    #[derive(Clone, Copy, PartialEq)]
-    enum Text {
-        None,
-        Formula1,
-        Formula2,
-        CfFormula,
-    }
-    let mut out = SheetTools::default();
-    // AutoFilter state.
-    let mut column: Option<(u32, Option<ColumnFilter>, bool)> = None;
-    // Validation and conditional-format state.
-    let mut validation: Option<Validation> = None;
-    let mut cf_ranges: Vec<Range> = Vec::new();
-    let mut rule: Option<RuleDraft> = None;
-    let mut cf_rules: Vec<(i64, CfRule)> = Vec::new();
-    let mut text = Text::None;
-    walk(xml, |ev| match ev {
-        // ---- autoFilter
-        XmlEvent::Start { name: "autoFilter", attrs } => {
-            out.filter = parse_sqref(attr(attrs, "ref")).first().map(|r| AutoFilter::new(*r));
-        }
-        XmlEvent::Start { name: "filterColumn", attrs } => {
-            if let (Some(f), Ok(id)) = (&out.filter, attr(attrs, "colId").parse::<u32>()) {
-                column = Some((f.range.start.col + id, None, false));
+#[derive(Clone, Copy, PartialEq, Default)]
+enum Text {
+    #[default]
+    None,
+    Formula1,
+    Formula2,
+    CfFormula,
+}
+
+/// Reads the AutoFilter, validations and conditional formats while
+/// `xlsx::sheet_data` walks the worksheet, so a big sheet is read in one pass.
+#[derive(Default)]
+pub(super) struct ToolsReader {
+    out: SheetTools,
+    /// AutoFilter column being read: (column, filter, unsupported).
+    column: Option<(u32, Option<ColumnFilter>, bool)>,
+    validation: Option<Validation>,
+    cf_ranges: Vec<Range>,
+    rule: Option<RuleDraft>,
+    cf_rules: Vec<(i64, CfRule)>,
+    text: Text,
+}
+
+impl ToolsReader {
+    pub(super) fn event(&mut self, ev: &XmlEvent, dxfs: &[CfFormat]) {
+        let out = &mut self.out;
+        let column = &mut self.column;
+        let validation = &mut self.validation;
+        let rule = &mut self.rule;
+        let text = &mut self.text;
+        match ev {
+            // ---- autoFilter
+            XmlEvent::Start { name: "autoFilter", attrs } => {
+                out.filter = parse_sqref(&attr(attrs, "ref")).first().map(|r| AutoFilter::new(*r));
             }
-        }
-        XmlEvent::Start { name: "filters", attrs } => {
-            if let Some((_, slot, _)) = &mut column {
-                *slot = Some(ColumnFilter::Values { values: Default::default(), blanks: attr(attrs, "blank") == "1" });
-            }
-        }
-        XmlEvent::Start { name: "filter", attrs } => {
-            if let Some((_, Some(ColumnFilter::Values { values, .. }), _)) = &mut column {
-                values.insert(attr(attrs, "val").to_string());
-            }
-        }
-        // Date grouping isn't supported; keep such columns unfiltered rather than hiding everything.
-        XmlEvent::Start { name: "dateGroupItem" | "iconFilter" | "colorFilter", .. } => {
-            if let Some((_, _, unsupported)) = &mut column {
-                *unsupported = true;
-            }
-        }
-        XmlEvent::Start { name: "customFilters", attrs } => {
-            if let Some((_, slot, _)) = &mut column {
-                *slot = Some(ColumnFilter::Custom { and: attr(attrs, "and") == "1", conditions: Vec::new() });
-            }
-        }
-        XmlEvent::Start { name: "customFilter", attrs } => {
-            if let Some((_, Some(ColumnFilter::Custom { conditions, .. }), _)) = &mut column {
-                if let Some(op) = CompareOp::parse(attr(attrs, "operator")) {
-                    conditions.push(Condition { op, value: attr(attrs, "val").to_string() });
+            XmlEvent::Start { name: "filterColumn", attrs } => {
+                if let (Some(f), Ok(id)) = (&out.filter, attr(attrs, "colId").parse::<u32>()) {
+                    *column = Some((f.range.start.col + id, None, false));
                 }
             }
-        }
-        XmlEvent::Start { name: "top10", attrs } => {
-            if let Some((_, slot, _)) = &mut column {
-                *slot = Some(ColumnFilter::Top10 {
-                    top: attr(attrs, "top") != "0",
-                    percent: attr(attrs, "percent") == "1",
-                    value: attr(attrs, "val").parse().unwrap_or(10.0),
+            XmlEvent::Start { name: "filters", attrs } => {
+                if let Some((_, slot, _)) = column {
+                    *slot = Some(ColumnFilter::Values { values: Default::default(), blanks: attr(attrs, "blank") == "1" });
+                }
+            }
+            XmlEvent::Start { name: "filter", attrs } => {
+                if let Some((_, Some(ColumnFilter::Values { values, .. }), _)) = column {
+                    values.insert(attr(attrs, "val").into_owned());
+                }
+            }
+            // Date grouping isn't supported; keep such columns unfiltered rather than hiding everything.
+            XmlEvent::Start { name: "dateGroupItem" | "iconFilter" | "colorFilter", .. } => {
+                if let Some((_, _, unsupported)) = column {
+                    *unsupported = true;
+                }
+            }
+            XmlEvent::Start { name: "customFilters", attrs } => {
+                if let Some((_, slot, _)) = column {
+                    *slot = Some(ColumnFilter::Custom { and: attr(attrs, "and") == "1", conditions: Vec::new() });
+                }
+            }
+            XmlEvent::Start { name: "customFilter", attrs } => {
+                if let Some((_, Some(ColumnFilter::Custom { conditions, .. }), _)) = column {
+                    if let Some(op) = CompareOp::parse(&attr(attrs, "operator")) {
+                        conditions.push(Condition { op, value: attr(attrs, "val").into_owned() });
+                    }
+                }
+            }
+            XmlEvent::Start { name: "top10", attrs } => {
+                if let Some((_, slot, _)) = column {
+                    *slot = Some(ColumnFilter::Top10 {
+                        top: attr(attrs, "top") != "0",
+                        percent: attr(attrs, "percent") == "1",
+                        value: attr(attrs, "val").parse().unwrap_or(10.0),
+                    });
+                }
+            }
+            XmlEvent::Start { name: "dynamicFilter", attrs } => {
+                if let Some((_, slot, unsupported)) = column {
+                    match &*attr(attrs, "type") {
+                        "aboveAverage" => *slot = Some(ColumnFilter::Average { above: true }),
+                        "belowAverage" => *slot = Some(ColumnFilter::Average { above: false }),
+                        _ => *unsupported = true,
+                    }
+                }
+            }
+            XmlEvent::End { name: "filterColumn" } => {
+                if let (Some((col, Some(f), false)), Some(filter)) = (column.take(), &mut out.filter) {
+                    filter.columns.insert(col, f);
+                }
+            }
+
+            // ---- dataValidations
+            XmlEvent::Start { name: "dataValidation", attrs } => {
+                let flag = |k: &str| matches!(&*attr(attrs, k), "1" | "true");
+                *validation = Some(Validation {
+                    ranges: parse_sqref(&attr(attrs, "sqref")),
+                    kind: ValidationKind::parse(&attr(attrs, "type")),
+                    operator: ValidationOp::parse(&attr(attrs, "operator")),
+                    allow_blank: flag("allowBlank"),
+                    // Excel's showDropDown="1" means *hide* the in-cell dropdown.
+                    in_cell_dropdown: !flag("showDropDown"),
+                    show_input: flag("showInputMessage"),
+                    input_title: attr(attrs, "promptTitle").into_owned(),
+                    input_message: attr(attrs, "prompt").into_owned(),
+                    show_error: flag("showErrorMessage"),
+                    error_style: ErrorStyle::parse(&attr(attrs, "errorStyle")),
+                    error_title: attr(attrs, "errorTitle").into_owned(),
+                    error_message: attr(attrs, "error").into_owned(),
+                    ..Validation::default()
                 });
             }
-        }
-        XmlEvent::Start { name: "dynamicFilter", attrs } => {
-            if let Some((_, slot, unsupported)) = &mut column {
-                match attr(attrs, "type") {
-                    "aboveAverage" => *slot = Some(ColumnFilter::Average { above: true }),
-                    "belowAverage" => *slot = Some(ColumnFilter::Average { above: false }),
-                    _ => *unsupported = true,
+            XmlEvent::Start { name: "formula1", .. } if validation.is_some() => *text = Text::Formula1,
+            XmlEvent::Start { name: "formula2", .. } if validation.is_some() => *text = Text::Formula2,
+            XmlEvent::End { name: "formula1" | "formula2" } => *text = Text::None,
+            XmlEvent::End { name: "dataValidation" } => {
+                if let Some(v) = validation.take().filter(|v| !v.ranges.is_empty()) {
+                    out.validations.push(v);
                 }
             }
-        }
-        XmlEvent::End { name: "filterColumn" } => {
-            if let (Some((col, Some(f), false)), Some(filter)) = (column.take(), &mut out.filter) {
-                filter.columns.insert(col, f);
-            }
-        }
 
-        // ---- dataValidations
-        XmlEvent::Start { name: "dataValidation", attrs } => {
-            let flag = |k: &str| attr(attrs, k) == "1" || attr(attrs, k) == "true";
-            validation = Some(Validation {
-                ranges: parse_sqref(attr(attrs, "sqref")),
-                kind: ValidationKind::parse(attr(attrs, "type")),
-                operator: ValidationOp::parse(attr(attrs, "operator")),
-                allow_blank: flag("allowBlank"),
-                // Excel's showDropDown="1" means *hide* the in-cell dropdown.
-                in_cell_dropdown: !flag("showDropDown"),
-                show_input: flag("showInputMessage"),
-                input_title: attr(attrs, "promptTitle").to_string(),
-                input_message: attr(attrs, "prompt").to_string(),
-                show_error: flag("showErrorMessage"),
-                error_style: ErrorStyle::parse(attr(attrs, "errorStyle")),
-                error_title: attr(attrs, "errorTitle").to_string(),
-                error_message: attr(attrs, "error").to_string(),
-                ..Validation::default()
-            });
-        }
-        XmlEvent::Start { name: "formula1", .. } if validation.is_some() => text = Text::Formula1,
-        XmlEvent::Start { name: "formula2", .. } if validation.is_some() => text = Text::Formula2,
-        XmlEvent::End { name: "formula1" | "formula2" } => text = Text::None,
-        XmlEvent::End { name: "dataValidation" } => {
-            if let Some(v) = validation.take().filter(|v| !v.ranges.is_empty()) {
-                out.validations.push(v);
+            // ---- conditionalFormatting
+            XmlEvent::Start { name: "conditionalFormatting", attrs } => {
+                self.cf_ranges = parse_sqref(&attr(attrs, "sqref"))
             }
-        }
-
-        // ---- conditionalFormatting
-        XmlEvent::Start { name: "conditionalFormatting", attrs } => cf_ranges = parse_sqref(attr(attrs, "sqref")),
-        XmlEvent::Start { name: "cfRule", attrs } => {
-            rule =
-                Some(RuleDraft { attrs: attrs.to_vec(), formulas: Vec::new(), cfvos: Vec::new(), colors: Vec::new() });
-        }
-        XmlEvent::Start { name: "formula", .. } if rule.is_some() => {
-            text = Text::CfFormula;
-            if let Some(r) = &mut rule {
-                r.formulas.push(String::new());
+            XmlEvent::Start { name: "cfRule", attrs } => {
+                let attrs = ["type", "operator", "text", "timePeriod", "bottom", "percent", "rank", "aboveAverage",
+                    "equalAverage", "dxfId", "stopIfTrue", "priority"]
+                    .iter()
+                    .filter_map(|k| attrs.get(k).map(|v| (k.to_string(), v.into_owned())))
+                    .collect();
+                *rule = Some(RuleDraft { attrs, formulas: Vec::new(), cfvos: Vec::new(), colors: Vec::new() });
             }
-        }
-        XmlEvent::End { name: "formula" } => text = Text::None,
-        XmlEvent::Start { name: "cfvo", attrs } => {
-            if let Some(r) = &mut rule {
-                r.cfvos.push(Cfvo::parse(attr(attrs, "type"), attr(attrs, "val")));
-            }
-        }
-        XmlEvent::Start { name: "color", attrs } if rule.is_some() => {
-            if let Some(r) = &mut rule {
-                r.colors.push(rgb(attr(attrs, "rgb")).unwrap_or_else(|| "#638EC6".into()));
-            }
-        }
-        XmlEvent::End { name: "cfRule" } => {
-            if let Some(draft) = rule.take() {
-                if let Some(r) = draft.build(&cf_ranges, dxfs) {
-                    let priority = attr(&draft.attrs, "priority").parse().unwrap_or(i64::MAX);
-                    cf_rules.push((priority, r));
+            XmlEvent::Start { name: "formula", .. } if rule.is_some() => {
+                *text = Text::CfFormula;
+                if let Some(r) = rule {
+                    r.formulas.push(String::new());
                 }
             }
-        }
-
-        XmlEvent::Text(t) => match text {
-            Text::Formula1 => validation.as_mut().unwrap().formula1.push_str(t),
-            Text::Formula2 => validation.as_mut().unwrap().formula2.push_str(t),
-            Text::CfFormula => {
-                if let Some(f) = rule.as_mut().and_then(|r| r.formulas.last_mut()) {
-                    f.push_str(t)
+            XmlEvent::End { name: "formula" } => *text = Text::None,
+            XmlEvent::Start { name: "cfvo", attrs } => {
+                if let Some(r) = rule {
+                    r.cfvos.push(Cfvo::parse(&attr(attrs, "type"), &attr(attrs, "val")));
                 }
             }
-            Text::None => {}
-        },
-        _ => {}
-    });
-    cf_rules.sort_by_key(|(p, _)| *p);
-    out.cond_formats = cf_rules.into_iter().map(|(_, r)| r).collect();
-    out
+            XmlEvent::Start { name: "color", attrs } if rule.is_some() => {
+                if let Some(r) = rule {
+                    r.colors.push(rgb(&attr(attrs, "rgb")).unwrap_or_else(|| "#638EC6".into()));
+                }
+            }
+            XmlEvent::End { name: "cfRule" } => {
+                if let Some(draft) = rule.take() {
+                    if let Some(r) = draft.build(&self.cf_ranges, dxfs) {
+                        let priority = draft.attr("priority").parse().unwrap_or(i64::MAX);
+                        self.cf_rules.push((priority, r));
+                    }
+                }
+            }
+
+            XmlEvent::Text(t) => match *text {
+                Text::Formula1 => validation.as_mut().unwrap().formula1.push_str(t),
+                Text::Formula2 => validation.as_mut().unwrap().formula2.push_str(t),
+                Text::CfFormula => {
+                    if let Some(f) = rule.as_mut().and_then(|r| r.formulas.last_mut()) {
+                        f.push_str(t)
+                    }
+                }
+                Text::None => {}
+            },
+            _ => {}
+        }
+    }
+
+    pub(super) fn finish(mut self) -> SheetTools {
+        self.cf_rules.sort_by_key(|(p, _)| *p);
+        self.out.cond_formats = self.cf_rules.into_iter().map(|(_, r)| r).collect();
+        self.out
+    }
 }
 
 struct RuleDraft {
@@ -225,8 +249,12 @@ struct RuleDraft {
 }
 
 impl RuleDraft {
+    fn attr(&self, key: &str) -> &str {
+        self.attrs.iter().find(|(k, _)| k == key).map_or("", |(_, v)| v)
+    }
+
     fn build(&self, ranges: &[Range], dxfs: &[CfFormat]) -> Option<CfRule> {
-        let a = |k: &str| attr(&self.attrs, k);
+        let a = |k: &str| self.attr(k);
         let formula = |i: usize| self.formulas.get(i).cloned().unwrap_or_default();
         let kind = match a("type") {
             "cellIs" => CfKind::CellIs { op: CellOp::parse(a("operator"))?, f1: formula(0), f2: formula(1) },
@@ -643,7 +671,7 @@ mod tests {
         tools.cond_formats =
             vec![rule_from_spec(range("A1:A3"), "text", &["containsText".into(), "a\"b".into()], "lightRed").unwrap()];
         s.set_data_tools(tools);
-        let xml = super::super::worksheet_xml(s, &mut StyleTable::default());
+        let xml = super::super::worksheet_xml(s, &mut StyleTable::default(), &mut Default::default());
         let sheet_data_end = xml.find("</sheetData>").unwrap();
         let af = xml.find(r#"<autoFilter ref="A1:A3"/>"#).unwrap();
         let cf = xml.find(r#"<conditionalFormatting sqref="A1:A3">"#).unwrap();

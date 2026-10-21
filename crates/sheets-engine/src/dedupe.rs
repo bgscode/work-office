@@ -69,7 +69,7 @@ mod tests {
         let s = sheet();
         let d = s.with_duplicates_removed(Range::new(at("A1"), at("B6")), &[0, 1], true);
         assert_eq!((d.removed, d.remaining), (2, 3));
-        let names: Vec<&str> = (0..6).map(|r| d.sheet.input(CellRef::new(r, 0))).collect();
+        let names: Vec<String> = (0..6).map(|r| d.sheet.input(CellRef::new(r, 0)).into_owned()).collect();
         assert_eq!(names, ["Name", "Asha", "Ravi", "Asha", "", ""]);
         assert_eq!(d.sheet.input(at("B4")), "Pune");
         assert_eq!(d.sheet.input(at("A8")), "below the table");

@@ -58,7 +58,7 @@ impl Sheet {
                     Some(r) => {
                         let from = CellRef::new(r, col);
                         out.set_style(to, self.style(from).clone());
-                        edits.push((to, refs::shift_input(self.input(from), to_row as i64 - r as i64, 0)));
+                        edits.push((to, refs::shift_input(&self.input(from), to_row as i64 - r as i64, 0)));
                     }
                     None => {
                         out.set_style(to, crate::Style::default());

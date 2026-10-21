@@ -12,11 +12,13 @@
 
 mod conditional;
 mod datetime;
+mod financial;
 mod format;
 mod info;
 mod logical;
 mod lookup;
 mod math;
+mod reference;
 mod stats;
 mod text;
 
@@ -138,6 +140,22 @@ const ANY: Option<usize> = None;
 /// (so `STDEV` < `STDEV.P` < `STDEVP`); [`lookup`] relies on that.
 pub static FUNCTIONS: &[Function] = &[
     f("ABS", 1, Some(1), math::abs, "ABS(number)", "Absolute value of a number."),
+    f(
+        "ADDRESS",
+        2,
+        Some(5),
+        reference::address,
+        "ADDRESS(row, column, [abs_num], [a1], [sheet_text])",
+        "A cell reference as text, like $A$1.",
+    ),
+    f(
+        "AGGREGATE",
+        3,
+        ANY,
+        reference::special,
+        "AGGREGATE(function_num, options, ref1, ...)",
+        "A total that can skip errors, hidden rows and nested subtotals.",
+    ),
     f("AND", 1, ANY, logical::and, "AND(logical1, [logical2], ...)", "TRUE if every argument is TRUE."),
     f("AVERAGE", 1, ANY, math::average, "AVERAGE(number1, [number2], ...)", "Arithmetic mean of the numbers."),
     f(
@@ -175,6 +193,15 @@ pub static FUNCTIONS: &[Function] = &[
     ),
     f("CLEAN", 1, Some(1), text::clean, "CLEAN(text)", "Removes non-printable characters."),
     f("CODE", 1, Some(1), text::code, "CODE(text)", "Numeric code of the first character."),
+    f(
+        "COLUMN",
+        0,
+        Some(1),
+        reference::special,
+        "COLUMN([reference])",
+        "Column number of a reference, or of this cell.",
+    ),
+    f("COLUMNS", 1, Some(1), reference::special, "COLUMNS(array)", "Number of columns in a reference."),
     f("CONCAT", 1, ANY, text::concat, "CONCAT(text1, [text2], ...)", "Joins text, including whole ranges."),
     f("CONCATENATE", 1, ANY, text::concat, "CONCATENATE(text1, [text2], ...)", "Joins text."),
     f("COUNT", 1, ANY, math::count, "COUNT(value1, [value2], ...)", "Counts numbers."),
@@ -201,7 +228,24 @@ pub static FUNCTIONS: &[Function] = &[
     f("DATEVALUE", 1, Some(1), datetime::datevalue, "DATEVALUE(date_text)", "Converts date text to a serial number."),
     f("DAY", 1, Some(1), datetime::day, "DAY(date)", "Day of the month, 1 to 31."),
     f("DAYS", 2, Some(2), datetime::days, "DAYS(end_date, start_date)", "Number of days between two dates."),
+    f(
+        "DB",
+        4,
+        Some(5),
+        financial::db,
+        "DB(cost, salvage, life, period, [month])",
+        "Depreciation by the fixed-declining balance method.",
+    ),
+    f(
+        "DDB",
+        4,
+        Some(5),
+        financial::ddb,
+        "DDB(cost, salvage, life, period, [factor])",
+        "Depreciation by the double-declining balance method.",
+    ),
     f("EDATE", 2, Some(2), datetime::edate, "EDATE(start_date, months)", "Same day a number of months away."),
+    f("EFFECT", 2, Some(2), financial::effect, "EFFECT(nominal_rate, npery)", "Effective annual interest rate."),
     f(
         "EOMONTH",
         2,
@@ -231,6 +275,7 @@ pub static FUNCTIONS: &[Function] = &[
         "FLOOR(number, significance)",
         "Rounds down to the nearest multiple of significance.",
     ),
+    f("FV", 3, Some(5), financial::fv, "FV(rate, nper, pmt, [pv], [type])", "Future value of an investment."),
     f("GCD", 1, ANY, math::gcd, "GCD(number1, [number2], ...)", "Greatest common divisor."),
     f(
         "HLOOKUP",
@@ -267,7 +312,17 @@ pub static FUNCTIONS: &[Function] = &[
         "Value for the first condition that is TRUE.",
     ),
     f("INDEX", 2, Some(3), lookup::index, "INDEX(range, row, [col])", "Value at a row and column of a range."),
+    f("INDIRECT", 1, Some(2), reference::special, "INDIRECT(ref_text, [a1])", "The reference named by a text string."),
     f("INT", 1, Some(1), math::int, "INT(number)", "Rounds down to an integer."),
+    f(
+        "IPMT",
+        4,
+        Some(6),
+        financial::ipmt,
+        "IPMT(rate, per, nper, pv, [fv], [type])",
+        "Interest part of a loan payment.",
+    ),
+    f("IRR", 1, Some(2), financial::irr, "IRR(values, [guess])", "Internal rate of return of cash flows."),
     f("ISBLANK", 1, Some(1), info::isblank, "ISBLANK(value)", "TRUE if the cell is empty."),
     f("ISERR", 1, Some(1), info::iserr, "ISERR(value)", "TRUE for any error except #N/A."),
     f("ISERROR", 1, Some(1), info::iserror, "ISERROR(value)", "TRUE for any error."),
@@ -322,18 +377,60 @@ pub static FUNCTIONS: &[Function] = &[
         "NETWORKDAYS(start_date, end_date, [holidays])",
         "Working days between two dates, inclusive.",
     ),
+    f("NOMINAL", 2, Some(2), financial::nominal, "NOMINAL(effect_rate, npery)", "Nominal annual interest rate."),
     f("NOT", 1, Some(1), logical::not, "NOT(logical)", "Reverses TRUE and FALSE."),
     f("NOW", 0, Some(0), datetime::now, "NOW()", "Current date and time."),
+    f("NPER", 3, Some(5), financial::nper, "NPER(rate, pmt, pv, [fv], [type])", "Number of periods for an investment."),
+    f("NPV", 2, ANY, financial::npv, "NPV(rate, value1, [value2], ...)", "Net present value of cash flows."),
     f("ODD", 1, Some(1), math::odd, "ODD(number)", "Rounds away from zero to an odd integer."),
+    f(
+        "OFFSET",
+        3,
+        Some(5),
+        reference::special,
+        "OFFSET(reference, rows, cols, [height], [width])",
+        "A reference shifted from a starting reference.",
+    ),
     f("OR", 1, ANY, logical::or, "OR(logical1, [logical2], ...)", "TRUE if any argument is TRUE."),
+    f("PERCENTILE", 2, Some(2), stats::percentile_inc, "PERCENTILE(array, k)", "The k-th percentile of values."),
+    f(
+        "PERCENTILE.EXC",
+        2,
+        Some(2),
+        stats::percentile_exc,
+        "PERCENTILE.EXC(array, k)",
+        "The k-th percentile, k strictly between 0 and 1.",
+    ),
+    f(
+        "PERCENTILE.INC",
+        2,
+        Some(2),
+        stats::percentile_inc,
+        "PERCENTILE.INC(array, k)",
+        "The k-th percentile of values.",
+    ),
     f("PI", 0, Some(0), math::pi, "PI()", "The number pi."),
+    f("PMT", 3, Some(5), financial::pmt, "PMT(rate, nper, pv, [fv], [type])", "Payment for a loan."),
     f("POWER", 2, Some(2), math::power, "POWER(number, power)", "A number raised to a power."),
+    f(
+        "PPMT",
+        4,
+        Some(6),
+        financial::ppmt,
+        "PPMT(rate, per, nper, pv, [fv], [type])",
+        "Principal part of a loan payment.",
+    ),
     f("PRODUCT", 1, ANY, math::product, "PRODUCT(number1, [number2], ...)", "Multiplies numbers."),
     f("PROPER", 1, Some(1), text::proper, "PROPER(text)", "Capitalizes the first letter of each word."),
+    f("PV", 3, Some(5), financial::pv, "PV(rate, nper, pmt, [fv], [type])", "Present value of an investment."),
+    f("QUARTILE", 2, Some(2), stats::quartile_inc, "QUARTILE(array, quart)", "A quartile of values."),
+    f("QUARTILE.EXC", 2, Some(2), stats::quartile_exc, "QUARTILE.EXC(array, quart)", "A quartile, excluding 0 and 1."),
+    f("QUARTILE.INC", 2, Some(2), stats::quartile_inc, "QUARTILE.INC(array, quart)", "A quartile of values."),
     f("RAND", 0, Some(0), math::rand, "RAND()", "Random number from 0 up to 1."),
     f("RANDBETWEEN", 2, Some(2), math::randbetween, "RANDBETWEEN(bottom, top)", "Random integer between two numbers."),
     f("RANK", 2, Some(3), stats::rank, "RANK(number, ref, [order])", "Rank of a number in a list."),
     f("RANK.EQ", 2, Some(3), stats::rank, "RANK.EQ(number, ref, [order])", "Rank of a number in a list."),
+    f("RATE", 3, Some(6), financial::rate, "RATE(nper, pmt, pv, [fv], [type], [guess])", "Interest rate per period."),
     f(
         "REPLACE",
         4,
@@ -347,6 +444,8 @@ pub static FUNCTIONS: &[Function] = &[
     f("ROUND", 2, Some(2), math::round, "ROUND(number, digits)", "Rounds to a number of digits."),
     f("ROUNDDOWN", 2, Some(2), math::rounddown, "ROUNDDOWN(number, digits)", "Rounds toward zero."),
     f("ROUNDUP", 2, Some(2), math::roundup, "ROUNDUP(number, digits)", "Rounds away from zero."),
+    f("ROW", 0, Some(1), reference::special, "ROW([reference])", "Row number of a reference, or of this cell."),
+    f("ROWS", 1, Some(1), reference::special, "ROWS(array)", "Number of rows in a reference."),
     f(
         "SEARCH",
         2,
@@ -357,6 +456,7 @@ pub static FUNCTIONS: &[Function] = &[
     ),
     f("SECOND", 1, Some(1), datetime::second, "SECOND(time)", "Second of a time, 0 to 59."),
     f("SIGN", 1, Some(1), math::sign, "SIGN(number)", "1, 0 or -1 depending on the sign."),
+    f("SLN", 3, Some(3), financial::sln, "SLN(cost, salvage, life)", "Straight-line depreciation for one period."),
     f("SMALL", 2, Some(2), stats::small, "SMALL(data, k)", "The k-th smallest number."),
     f("SQRT", 1, Some(1), math::sqrt, "SQRT(number)", "Square root."),
     f("STDEV", 1, ANY, stats::stdev, "STDEV(number1, [number2], ...)", "Standard deviation of a sample."),
@@ -377,6 +477,14 @@ pub static FUNCTIONS: &[Function] = &[
         text::substitute,
         "SUBSTITUTE(text, old_text, new_text, [instance])",
         "Replaces occurrences of a text.",
+    ),
+    f(
+        "SUBTOTAL",
+        2,
+        ANY,
+        reference::special,
+        "SUBTOTAL(function_num, ref1, ...)",
+        "A subtotal that skips nested subtotals (and hidden rows for 101-111).",
     ),
     f("SUM", 1, ANY, math::sum, "SUM(number1, [number2], ...)", "Adds numbers."),
     f(
@@ -458,6 +566,14 @@ pub static FUNCTIONS: &[Function] = &[
         "Date a number of working days away.",
     ),
     f(
+        "XIRR",
+        2,
+        Some(3),
+        financial::xirr,
+        "XIRR(values, dates, [guess])",
+        "Internal rate of return for irregular cash flows.",
+    ),
+    f(
         "XLOOKUP",
         3,
         Some(6),
@@ -465,6 +581,7 @@ pub static FUNCTIONS: &[Function] = &[
         "XLOOKUP(lookup_value, lookup_array, return_array, [if_not_found], [match_mode], [search_mode])",
         "Finds a value and returns the matching item from another range.",
     ),
+    f("XNPV", 3, Some(3), financial::xnpv, "XNPV(rate, values, dates)", "Net present value for irregular cash flows."),
     f("XOR", 1, ANY, logical::xor, "XOR(logical1, [logical2], ...)", "TRUE if an odd number of arguments are TRUE."),
     f("YEAR", 1, Some(1), datetime::year, "YEAR(date)", "Year of a date."),
 ];

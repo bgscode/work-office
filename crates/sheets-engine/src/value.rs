@@ -135,15 +135,36 @@ impl Value {
         match self {
             Value::Empty => String::new(),
             Value::Number(n) => format!("{n}"),
-            Value::Text(s) if !s.starts_with('=') && Value::from_input(s) == *self => s.clone(),
+            Value::Text(s) if Value::text_round_trips(s) => s.clone(),
             Value::Text(s) => format!("'{s}"),
             Value::Bool(_) | Value::Error(_) => self.display(),
         }
     }
 
+    /// True when typing `s` back gives exactly the text `s` (no leading `'`
+    /// needed). Cheap for ordinary text.
+    pub fn text_round_trips(s: &str) -> bool {
+        is_plain_text(s) || (!s.starts_with('=') && Value::from_input(s) == Value::Text(s.to_string()))
+    }
+
     pub fn is_empty(&self) -> bool {
         matches!(self, Value::Empty)
     }
+}
+
+/// Fast check for text that typing back can't turn into anything else:
+/// it starts with a letter and isn't TRUE/FALSE or a "Rs." amount. Saves the
+/// full parse for most text when loading big files.
+fn is_plain_text(s: &str) -> bool {
+    let Some(first) = s.chars().next() else { return false };
+    first.is_alphabetic()
+        && !s.eq_ignore_ascii_case("TRUE")
+        && !s.eq_ignore_ascii_case("FALSE")
+        && !s.starts_with("Rs.")
+        && !s.starts_with("inf")
+        && !s.starts_with("Inf")
+        && !s.starts_with("nan")
+        && !s.starts_with("NaN")
 }
 
 /// Excel ordering for comparisons: numbers < text < booleans; text is

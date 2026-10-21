@@ -394,7 +394,7 @@ impl Sheet {
         area.cells()
             .filter(|at| {
                 let input = self.input(*at);
-                !input.is_empty() && self.validation_at(*at).is_some_and(|v| !v.accepts(self, *at, input))
+                !input.is_empty() && self.validation_at(*at).is_some_and(|v| !v.accepts(self, *at, &input))
             })
             .collect()
     }
