@@ -14,44 +14,62 @@
 use sheets_engine::layout::{Freeze, LineSet, SheetLayout, DEFAULT_ROW_HEIGHT};
 use sheets_engine::{CellRef, Range, Sheet, MAX_COLS, MAX_ROWS};
 
-use super::{attr, px_to_chars, walk, XmlEvent};
+use super::px_to_chars;
+use crate::xml::{attr, Attrs, XmlEvent};
 
 const PX_PER_PT: f64 = 4.0 / 3.0;
 
-fn on(attrs: &[(String, String)], key: &str) -> bool {
-    matches!(attr(attrs, key), "1" | "true")
+fn on(attrs: &Attrs, key: &str) -> bool {
+    matches!(&*attr(attrs, key), "1" | "true")
 }
 
-/// Read row heights, hidden lines, merges and frozen panes from a worksheet part.
-pub(super) fn read(xml: &str) -> SheetLayout {
-    let mut layout = SheetLayout::default();
-    let mut default_ht = 15.0;
-    let mut zero_height = false;
-    // Rows listed in <sheetData>, for zeroHeight sheets.
-    let mut listed: Vec<u32> = Vec::new();
-    let mut merges = Vec::new();
-    let mut next_row = 0u32;
-    walk(xml, |ev| {
+/// Reads row heights, hidden lines, merges and frozen panes while
+/// `xlsx::sheet_data` walks the worksheet, so a big sheet is read in one pass.
+pub(super) struct LayoutReader {
+    layout: SheetLayout,
+    default_ht: f64,
+    zero_height: bool,
+    /// Rows listed in <sheetData>, for zeroHeight sheets.
+    listed: Vec<u32>,
+    merges: Vec<Range>,
+    next_row: u32,
+}
+
+impl Default for LayoutReader {
+    fn default() -> Self {
+        LayoutReader {
+            layout: SheetLayout::default(),
+            default_ht: 15.0,
+            zero_height: false,
+            listed: Vec::new(),
+            merges: Vec::new(),
+            next_row: 0,
+        }
+    }
+}
+
+impl LayoutReader {
+    pub(super) fn event(&mut self, ev: &XmlEvent) {
         let XmlEvent::Start { name, attrs } = ev else { return };
         match *name {
             "sheetFormatPr" => {
-                default_ht = attr(attrs, "defaultRowHeight").parse().unwrap_or(15.0);
-                zero_height = on(attrs, "zeroHeight");
+                self.default_ht = attr(attrs, "defaultRowHeight").parse().unwrap_or(15.0);
+                self.zero_height = on(attrs, "zeroHeight");
             }
             "row" => {
-                let row = attr(attrs, "r").parse::<u32>().map_or(next_row, |r| r.saturating_sub(1));
-                next_row = row + 1;
+                let row = attr(attrs, "r").parse::<u32>().map_or(self.next_row, |r| r.saturating_sub(1));
+                self.next_row = row + 1;
                 if row >= MAX_ROWS {
                     return;
                 }
-                listed.push(row);
+                self.listed.push(row);
                 if on(attrs, "hidden") {
-                    layout.hidden_rows.set(row, row, Some(()));
+                    self.layout.hidden_rows.set(row, row, Some(()));
                 }
                 if let Ok(ht) = attr(attrs, "ht").parse::<f64>() {
                     // Custom heights, plus rows Excel grew to fit (wrapped text, big fonts).
-                    if on(attrs, "customHeight") || ht > default_ht + 0.5 {
-                        layout.set_row_height(row, row, Some(ht * PX_PER_PT));
+                    if on(attrs, "customHeight") || ht > self.default_ht + 0.5 {
+                        self.layout.set_row_height(row, row, Some(ht * PX_PER_PT));
                     }
                 }
             }
@@ -60,39 +78,47 @@ pub(super) fn read(xml: &str) -> SheetLayout {
                     return;
                 };
                 if min >= 1 && max >= min && min <= MAX_COLS {
-                    layout.hidden_cols.set(min - 1, max.min(MAX_COLS) - 1, Some(()));
+                    self.layout.hidden_cols.set(min - 1, max.min(MAX_COLS) - 1, Some(()));
                 }
             }
             "mergeCell" => {
                 if let Some((a, b)) = attr(attrs, "ref").split_once(':') {
                     if let (Some(a), Some(b)) = (CellRef::parse(a), CellRef::parse(b)) {
-                        merges.push(Range::new(a, b));
+                        self.merges.push(Range::new(a, b));
                     }
                 }
             }
-            "pane" if matches!(attr(attrs, "state"), "frozen" | "frozenSplit") => {
+            "pane" if matches!(&*attr(attrs, "state"), "frozen" | "frozenSplit") => {
                 let split = |key: &str| attr(attrs, key).parse::<f64>().map_or(0, |n| n.max(0.0) as u32);
                 let freeze =
                     Freeze { rows: split("ySplit").min(MAX_ROWS - 1), cols: split("xSplit").min(MAX_COLS - 1) };
-                layout.freeze = (freeze.rows > 0 || freeze.cols > 0).then_some(freeze);
+                self.layout.freeze = (freeze.rows > 0 || freeze.cols > 0).then_some(freeze);
             }
             _ => {}
         }
-    });
-    if zero_height {
-        // Every row that isn't listed is hidden.
-        listed.sort_unstable();
-        listed.dedup();
-        let mut from = 0;
-        for row in listed.into_iter().chain([MAX_ROWS]) {
-            if row > from {
-                layout.hidden_rows.set(from, row - 1, Some(()));
-            }
-            from = row + 1;
-        }
     }
-    layout.set_merges(merges);
-    layout
+
+    pub(super) fn finish(self) -> SheetLayout {
+        let Self { mut layout, zero_height, listed, merges, .. } = self;
+        Self::finish_parts(&mut layout, zero_height, listed, merges);
+        layout
+    }
+
+    fn finish_parts(layout: &mut SheetLayout, zero_height: bool, mut listed: Vec<u32>, merges: Vec<Range>) {
+        if zero_height {
+            // Every row that isn't listed is hidden.
+            listed.sort_unstable();
+            listed.dedup();
+            let mut from = 0;
+            for row in listed.into_iter().chain([MAX_ROWS]) {
+                if row > from {
+                    layout.hidden_rows.set(from, row - 1, Some(()));
+                }
+                from = row + 1;
+            }
+        }
+        layout.set_merges(merges);
+    }
 }
 
 /// `<sheetViews>` with the frozen pane, or "" when nothing is frozen.

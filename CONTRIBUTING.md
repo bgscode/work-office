@@ -10,7 +10,7 @@ clone to merged pull request.
 3. Install Node.js 20+ and [pnpm](https://pnpm.io/installation) 10.
 4. `pnpm install`, then `pnpm dev` and open http://localhost:5173.
 
-After you change Rust code, re-run `pnpm build:wasm` (or restart `pnpm dev`) so the browser picks it up.
+After you change Rust code, re-run `pnpm build:wasm` (or restart `pnpm dev`) so the browser picks it up. `pnpm dev` uses an optimised engine build; `pnpm dev:debug` builds it with debug info (much slower). Performance work: see [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ## Where things live
 

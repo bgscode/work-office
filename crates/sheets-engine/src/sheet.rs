@@ -10,8 +10,13 @@
 //! (insert/delete rows and columns, sort) build a new `Sheet` with formulas
 //! rewritten; `ops::ReplaceSheet` makes them undoable.
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
+
+// FxHash: much faster than the default SipHash for small keys like CellRef;
+// hash-flooding resistance doesn't matter for a document's own cells.
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use crate::cell::{CellRef, Range, MAX_COLS, MAX_ROWS};
 use crate::fill::{self, FillDirection};
@@ -74,9 +79,29 @@ pub const DEFAULT_COL_WIDTH: f64 = 64.0;
 
 #[derive(Debug, Clone)]
 struct Cell {
-    /// Exactly what the user typed, e.g. "=SUM(A1:A3)" or "42".
-    input: String,
+    /// Exactly what the user typed, e.g. "=SUM(A1:A3)" or "12%". `None` when
+    /// it is simply the value written back (`Value::to_input`), which is true
+    /// for most literal cells: storing it would double the memory of big sheets.
+    input: Option<Box<str>>,
     content: Content,
+}
+
+impl Cell {
+    fn input(&self) -> Cow<'_, str> {
+        match (&self.input, &self.content) {
+            (Some(s), _) => Cow::Borrowed(s),
+            (None, Content::Literal(v)) => Cow::Owned(v.to_input()),
+            (None, Content::Formula { .. }) => Cow::Borrowed(""),
+        }
+    }
+
+    fn has_line_break(&self) -> bool {
+        match (&self.input, &self.content) {
+            (Some(s), _) => s.contains('\n'),
+            (None, Content::Literal(Value::Text(t))) => t.contains('\n'),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -140,8 +165,23 @@ impl Sheet {
     }
 
     /// The raw input of a cell ("" if empty).
-    pub fn input(&self, at: CellRef) -> &str {
-        self.cells.get(&at).map_or("", |c| c.input.as_str())
+    pub fn input(&self, at: CellRef) -> Cow<'_, str> {
+        self.cells.get(&at).map_or(Cow::Borrowed(""), Cell::input)
+    }
+
+    /// The formula of a cell including its `=`, or `None` for literal and empty cells.
+    pub fn formula_input(&self, at: CellRef) -> Option<&str> {
+        match self.cells.get(&at) {
+            Some(Cell { input: Some(s), content: Content::Formula { .. } }) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Every non-empty cell's position, sorted row by row.
+    pub fn cell_positions(&self) -> Vec<CellRef> {
+        let mut out: Vec<CellRef> = self.cells.keys().copied().collect();
+        out.sort_unstable();
+        out
     }
 
     /// The current value of a cell.
@@ -215,7 +255,7 @@ impl Sheet {
                     || (st.wrap && !self.input(**at).is_empty())
             })
             .map(|(at, _)| at.row)
-            .chain(self.cells.iter().filter(|(_, c)| c.input.contains('\n')).map(|(at, _)| at.row))
+            .chain(self.cells.iter().filter(|(_, c)| c.has_line_break()).map(|(at, _)| at.row))
             .collect();
         rows.sort_unstable();
         rows.dedup();
@@ -246,10 +286,38 @@ impl Sheet {
     }
 
     /// All non-empty cells, sorted row by row.
-    pub fn cells(&self) -> Vec<(CellRef, &str, &Value)> {
+    pub fn cells(&self) -> Vec<(CellRef, Cow<'_, str>, &Value)> {
         let mut out: Vec<_> = self.cells.keys().map(|&at| (at, self.input(at), self.value(at))).collect();
         out.sort_by_key(|(at, _, _)| *at);
         out
+    }
+
+    /// Bulk-load cells from a file into an empty sheet, then calculate once.
+    /// Literal values arrive already typed (`Some(value)`), so they skip the
+    /// typed-input parsing that `set_inputs` does; formulas (`None`) are parsed.
+    /// This is the fast path for opening large workbooks.
+    /// `input` may be `None` when it is just the value written back.
+    pub fn load_cells(&mut self, cells: Vec<(CellRef, Option<String>, Option<Value>)>) {
+        self.cells.reserve(cells.len());
+        let mut formulas = Vec::new();
+        for (at, input, value) in cells {
+            match value {
+                Some(Value::Empty) => {}
+                Some(v) => {
+                    self.extent = (self.extent.0.max(at.row + 1), self.extent.1.max(at.col + 1));
+                    let input = input.map(String::into_boxed_str);
+                    self.cells.insert(at, Cell { input, content: Content::Literal(v) });
+                }
+                None => {
+                    let Some(input) = input.filter(|i| !i.is_empty()) else { continue };
+                    self.write(at, input);
+                    if self.is_formula(at) {
+                        formulas.push(at);
+                    }
+                }
+            }
+        }
+        self.recalc(formulas.into_iter().collect());
     }
 
     fn write(&mut self, at: CellRef, input: String) {
@@ -287,6 +355,11 @@ impl Sheet {
                 Content::Literal(Value::from_input(&input))
             }
         };
+        // Keep the typed text only when the value alone wouldn't give it back.
+        let input = match &content {
+            Content::Literal(v) if v.to_input() == input => None,
+            _ => Some(input.into_boxed_str()),
+        };
         self.cells.insert(at, Cell { input, content });
         self.extent = (self.extent.0.max(at.row + 1), self.extent.1.max(at.col + 1));
     }
@@ -300,7 +373,7 @@ impl Sheet {
         let mut hits: Vec<CellRef> = self
             .cells
             .iter()
-            .filter(|(at, cell)| opts.matches(&cell.input, query) || opts.matches(&self.display(**at), query))
+            .filter(|(at, cell)| opts.matches(&cell.input(), query) || opts.matches(&self.display(**at), query))
             .map(|(at, _)| *at)
             .collect();
         hits.sort();
@@ -314,13 +387,13 @@ impl Sheet {
     /// New input for one cell after replacing `query` in it, or `None` if it doesn't match.
     pub fn replace_in(&self, at: CellRef, query: &str, replacement: &str, opts: FindOptions) -> Option<String> {
         let input = self.input(at);
-        if query.is_empty() || !opts.matches(input, query) {
+        if query.is_empty() || !opts.matches(&input, query) {
             return None;
         }
         Some(if opts.whole_cell {
             replacement.to_string()
         } else {
-            replace_text(input, query, replacement, opts.match_case)
+            replace_text(&input, query, replacement, opts.match_case)
         })
     }
 
@@ -433,7 +506,7 @@ impl Sheet {
         let edits: Vec<_> = self
             .cells
             .iter()
-            .filter_map(|(at, cell)| Some((move_cell(*at)?, refs::remap_input(&cell.input, axis, map))))
+            .filter_map(|(at, cell)| Some((move_cell(*at)?, refs::remap_input(&cell.input(), axis, map))))
             .collect();
         out.set_inputs(edits);
         out
@@ -454,7 +527,7 @@ impl Sheet {
             }
         });
         // rows[new_index] = old row
-        let mut new_row_of: HashMap<u32, u32> = HashMap::new();
+        let mut new_row_of: HashMap<u32, u32> = HashMap::default();
         for (i, old) in rows.iter().enumerate() {
             new_row_of.insert(*old, range.start.row + i as u32);
         }
@@ -471,9 +544,9 @@ impl Sheet {
             .map(|(at, cell)| {
                 if in_range(at) {
                     let to = CellRef::new(new_row_of[&at.row], at.col);
-                    (to, refs::shift_input(&cell.input, to.row as i64 - at.row as i64, 0))
+                    (to, refs::shift_input(&cell.input(), to.row as i64 - at.row as i64, 0))
                 } else {
-                    (*at, cell.input.clone())
+                    (*at, cell.input().into_owned())
                 }
             })
             .collect();

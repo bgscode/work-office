@@ -1,6 +1,9 @@
 // Documents saved in this browser: every open workbook is autosaved here and
-// listed under "Recent" on the Home page. Each document is stored as file
-// bytes (.xlsx for Sheets) in base64, plus a small index of names and times.
+// listed under "Recent" on the Home page.
+//
+// File bytes (.xlsx for Sheets) live in IndexedDB, which holds hundreds of
+// megabytes and stores binary data directly. A small index of names and times
+// stays in localStorage so Home can list recent files instantly.
 
 export type AppKind = "sheets" | "docs" | "slides";
 
@@ -13,22 +16,32 @@ export interface RecentDocument {
 }
 
 const INDEX_KEY = "office.recent";
-const DOC_PREFIX = "office.doc.";
-/** Older versions kept a single autosaved workbook under this key. */
-const LEGACY_KEY = "office.sheets.autosave";
+/** Older versions stored base64 bytes in localStorage under these keys. */
+const LEGACY_DOC_PREFIX = "office.doc.";
+const LEGACY_DRAFT_KEY = "office.sheets.autosave";
 const MAX_DOCUMENTS = 20;
 
-function toBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(binary);
+const DB_NAME = "office";
+const STORE = "documents";
+
+let dbPromise: Promise<IDBDatabase> | null = null;
+function db(): Promise<IDBDatabase> {
+  dbPromise ??= new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return dbPromise;
 }
 
-function fromBase64(text: string): Uint8Array {
-  const binary = atob(text);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
+async function idb<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  const database = await db();
+  return new Promise((resolve, reject) => {
+    const req = run(database.transaction(STORE, mode).objectStore(STORE));
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
 }
 
 function readIndex(): RecentDocument[] {
@@ -41,7 +54,18 @@ function readIndex(): RecentDocument[] {
 }
 
 function writeIndex(list: RecentDocument[]) {
-  localStorage.setItem(INDEX_KEY, JSON.stringify(list));
+  try {
+    localStorage.setItem(INDEX_KEY, JSON.stringify(list));
+  } catch {
+    // ignore: the list is a convenience
+  }
+}
+
+function fromBase64(text: string): Uint8Array {
+  const binary = atob(text);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 
 export function newDocumentId(): string {
@@ -50,51 +74,91 @@ export function newDocumentId(): string {
 
 /** Most recently saved first. */
 export function listRecent(): RecentDocument[] {
-  migrateLegacyDraft();
+  void migrateLegacyDraft();
   return readIndex().sort((a, b) => b.savedAt - a.savedAt);
 }
 
-/** Returns false if the browser refused to store it (storage full or blocked). */
-export function saveDocument(id: string, app: AppKind, name: string, bytes: Uint8Array): boolean {
+/** Record a document in Recent without touching its bytes (e.g. after a rename). */
+export function touchDocument(id: string, app: AppKind, name: string) {
+  const list = readIndex().filter((d) => d.id !== id);
+  list.unshift({ id, app, name, savedAt: Date.now() });
+  const dropped = list.splice(MAX_DOCUMENTS);
+  writeIndex(list);
+  for (const old of dropped) void idb("readwrite", (s) => s.delete(old.id)).catch(() => {});
+}
+
+/** Store a document's bytes. Resolves to false if the browser refused (storage full or blocked). */
+export async function saveDocument(id: string, app: AppKind, name: string, bytes: Uint8Array): Promise<boolean> {
   try {
-    localStorage.setItem(DOC_PREFIX + id, toBase64(bytes));
-    const list = readIndex().filter((d) => d.id !== id);
-    list.unshift({ id, app, name, savedAt: Date.now() });
-    // Keep the newest documents; drop the rest to stay within storage limits.
-    for (const old of list.splice(MAX_DOCUMENTS)) localStorage.removeItem(DOC_PREFIX + old.id);
-    writeIndex(list);
+    await idb("readwrite", (s) => s.put(bytes, id));
+    touchDocument(id, app, name);
     return true;
   } catch {
     return false;
   }
 }
 
-export function loadDocument(id: string): { name: string; bytes: Uint8Array } | null {
+/**
+ * A stored document. `bytes` is null for a document that only has a journal
+ * so far (a new workbook that was edited but never fully saved).
+ */
+export async function loadDocument(id: string): Promise<{ name: string; bytes: Uint8Array | null } | null> {
+  const entry = readIndex().find((d) => d.id === id);
+  if (!entry) return null;
   try {
-    const data = localStorage.getItem(DOC_PREFIX + id);
-    const entry = readIndex().find((d) => d.id === id);
-    if (!data || !entry) return null;
-    return { name: entry.name, bytes: fromBase64(data) };
+    const bytes = await idb<Uint8Array | undefined>("readonly", (s) => s.get(id));
+    if (bytes) return { name: entry.name, bytes };
   } catch {
-    return null;
+    // fall through to the legacy store
   }
+  // Saved by an older version: base64 in localStorage. Move it to IndexedDB.
+  const legacy = localStorage.getItem(LEGACY_DOC_PREFIX + id);
+  if (!legacy) return { name: entry.name, bytes: null };
+  const bytes = fromBase64(legacy);
+  if (await saveDocument(id, entry.app, entry.name, bytes)) localStorage.removeItem(LEGACY_DOC_PREFIX + id);
+  return { name: entry.name, bytes };
 }
 
-export function removeDocument(id: string) {
+export async function removeDocument(id: string) {
+  writeIndex(readIndex().filter((d) => d.id !== id));
+  localStorage.removeItem(LEGACY_DOC_PREFIX + id);
   try {
-    localStorage.removeItem(DOC_PREFIX + id);
-    writeIndex(readIndex().filter((d) => d.id !== id));
+    await idb("readwrite", (s) => s.delete(id));
+    await idb("readwrite", (s) => s.delete(journalKey(id)));
   } catch {
     // ignore
   }
 }
 
-function migrateLegacyDraft() {
+// ---- edit journal (see sheets/journal.ts)
+
+const journalKey = (id: string) => `${id}#journal`;
+
+/** Replace the stored journal of a document. */
+export async function writeJournal(id: string, entries: unknown[]): Promise<boolean> {
   try {
-    const raw = localStorage.getItem(LEGACY_KEY);
+    await idb("readwrite", (s) => s.put(entries, journalKey(id)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function readJournal(id: string): Promise<unknown[]> {
+  try {
+    return (await idb<unknown[] | undefined>("readonly", (s) => s.get(journalKey(id)))) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+async function migrateLegacyDraft() {
+  try {
+    const raw = localStorage.getItem(LEGACY_DRAFT_KEY);
     if (!raw) return;
+    localStorage.removeItem(LEGACY_DRAFT_KEY);
     const { name, xlsx } = JSON.parse(raw) as { name: string; xlsx: string };
-    if (saveDocument(newDocumentId(), "sheets", name || "Untitled", fromBase64(xlsx))) localStorage.removeItem(LEGACY_KEY);
+    await saveDocument(newDocumentId(), "sheets", name || "Untitled", fromBase64(xlsx));
   } catch {
     // ignore a corrupt legacy draft
   }

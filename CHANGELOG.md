@@ -6,6 +6,8 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Added
 
+- Performance: a 3-sheet × 100,000-row workbook (3M cells) opens in about 2.6 s in the browser instead of hanging; autosave no longer freezes (edits are journaled to IndexedDB in milliseconds); faster `.xlsx` reading and writing (single-pass zero-allocation XML reader, shared strings, typed loading). See docs/PERFORMANCE.md.
+
 - Grid layout: row heights (drag the row border, double-click to autofit, Row Height / Column Width dialogs in Excel's units), automatic row height for wrapped text and bigger fonts, hide/unhide rows and columns, Merge & Center / Across / Cells / Unmerge (selection and arrow keys treat merged cells as one), Freeze Panes (at selection, top row, first column). All saved in .xlsx.
 
 - Cell formatting: font family and size boxes, increase/decrease font size, Borders menu with Excel's presets, line styles and colours, Wrap Text, top/middle/bottom alignment, Format Painter; Alt+Enter turns on Wrap Text. All saved in .xlsx (fonts, borders, alignment).

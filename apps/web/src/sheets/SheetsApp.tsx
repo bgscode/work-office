@@ -7,7 +7,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { SheetsDocument, ValueKind, functionList, parseStyle, type FunctionInfo } from "@office/engine";
 import { Ribbon, type RibbonTab } from "@office/ui";
 import { download, pickFile } from "../files";
-import { loadDocument, saveDocument } from "../documents";
+import { saveDocument, touchDocument } from "../documents";
+import type { Journal } from "./journal";
 import { parseTsv, toTsv } from "./clipboard";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { FindBar, type FindOptions } from "./FindBar";
@@ -63,40 +64,35 @@ function savedZoom(): number {
   }
 }
 
+/** A full save quicker than this happens after every edit (see autosave). */
+const CHEAP_FULL_SAVE_MS = 150;
+/** Big workbooks are rewritten once this many edits are in the journal. */
+const COMPACT_AFTER_EDITS = 200;
+
 /** Formatting more cells than this at once is limited to the area holding data. */
 const MAX_FORMAT_CELLS = 200_000;
-
-/** The workbook saved under `docId` in this browser, or a new empty one. */
-function openSavedDocument(docId: string): { doc: SheetsDocument; name: string } {
-  const saved = loadDocument(docId);
-  if (saved) {
-    try {
-      return { doc: SheetsDocument.fromXlsx(saved.bytes), name: saved.name };
-    } catch {
-      // Unreadable: start empty rather than failing to open.
-    }
-  }
-  return { doc: new SheetsDocument(), name: "Untitled workbook" };
-}
 
 interface SheetsAppProps {
   /** Id this workbook is autosaved under (see documents.ts). */
   docId: string;
-  /** A file to open into this new document, chosen on Home or via File > Open. */
-  initialFile?: File;
-  onInitialFileOpened: () => void;
+  /** The opened workbook (see SheetsLoader.tsx). */
+  initialDoc: SheetsDocument;
+  /** Records the document's edits for autosave (see journal.ts). */
+  journal: Journal;
+  initialName: string;
+  /** False when the workbook isn't stored yet (e.g. a CSV just opened). */
+  initiallySaved: boolean;
   onNewWorkbook: () => void;
   onOpenFile: (file: File) => void;
 }
 
-export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbook, onOpenFile }: SheetsAppProps) {
-  const [initial] = useState(() => openSavedDocument(docId));
-  const [doc, setDoc] = useState(initial.doc);
-  const [fileName, setFileName] = useState(initial.name);
+export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySaved, onNewWorkbook, onOpenFile }: SheetsAppProps) {
+  const [doc, setDoc] = useState(initialDoc);
+  const [fileName, setFileName] = useState(initialName);
   const [sheet, setSheet] = useState(0);
   const [selection, setSelection] = useState<Selection>(single({ row: 0, col: 0 }));
   const [editing, setEditing] = useState<EditState | null>(null);
-  const [revision, setRevision] = useState(0);
+  const [revision, setRevision] = useState(initiallySaved ? 0 : 1);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [findMode, setFindMode] = useState<"find" | "replace" | null>(null);
   const [zoom, setZoomState] = useState(savedZoom);
@@ -146,36 +142,88 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
     }
   }
 
-  // ---- autosave: a second after the last change
+  // ---- autosave
+  //
+  // Every edit is appended to a journal right away (journal.ts): a few
+  // milliseconds whatever the workbook's size. The full .xlsx is rewritten
+  // ("compacted") after each edit when that is cheap; for big workbooks only
+  // once many edits have piled up and the user pauses, so typing never stalls.
 
-  const save = () => saveDocument(docId, "sheets", fileName, new Uint8Array(doc.toXlsx()));
+  /** How long the last full save took; null until the first one. */
+  const fullSaveMs = useRef<number | null>(null);
+  /** The stored file doesn't hold this workbook yet (e.g. a CSV just opened). */
+  const needsFullSave = useRef(!initiallySaved);
+
+  function estimatedSaveMs(): number {
+    if (fullSaveMs.current !== null) return fullSaveMs.current;
+    // About a microsecond per cell in the WebAssembly build.
+    return doc.sheetNames().reduce((sum, _, i) => {
+      const [rows, cols] = doc.extent(i);
+      return sum + rows * cols * 0.001;
+    }, 0);
+  }
+
+  function fullSave() {
+    const covered = journal.length;
+    const started = performance.now();
+    const bytes = new Uint8Array(doc.toXlsx());
+    fullSaveMs.current = performance.now() - started;
+    needsFullSave.current = false;
+    void saveDocument(docId, "sheets", fileName, bytes).then((ok) => {
+      if (ok) void journal.dropFirst(covered);
+      else setSaveFailed(true);
+    });
+  }
+
   useEffect(() => {
-    if (revision === 0) return;
+    if (revision === savedRevision) return;
+    const rev = revision;
     const timer = setTimeout(() => {
-      setSaveFailed(!save());
-      setSavedRevision(revision);
-    }, 1000);
+      touchDocument(docId, "sheets", fileName);
+      void journal.flush().then((ok) => {
+        setSaveFailed(!ok);
+        setSavedRevision((r) => Math.max(r, rev));
+      });
+      if (needsFullSave.current || estimatedSaveMs() < CHEAP_FULL_SAVE_MS) fullSave();
+    }, 300);
     return () => clearTimeout(timer);
-  }, [doc, revision, fileName]);
+  }, [doc, revision]);
 
-  // Leaving the workbook (Home, Back, another file) saves pending changes right away.
+  // Big workbooks: rewrite the file after a pause once enough edits piled up.
+  useEffect(() => {
+    if (journal.length < COMPACT_AFTER_EDITS) return;
+    const timer = setTimeout(fullSave, 10_000);
+    return () => clearTimeout(timer);
+  }, [revision]);
+
+  // A rename only updates the name shown in Recent.
+  const firstName = useRef(fileName);
+  useEffect(() => {
+    if (fileName !== firstName.current) touchDocument(docId, "sheets", fileName);
+  }, [fileName]);
+
+  // Leaving (tab hidden, page closed, Home): store the journal right away.
   const flush = useRef(() => {});
   flush.current = () => {
-    if (revision > 0 && revision !== savedRevision) save();
+    if (revision !== savedRevision) void journal.flush();
   };
-  useEffect(() => () => flush.current(), []);
+  useEffect(() => {
+    const onHide = () => document.visibilityState === "hidden" && flush.current();
+    const onLeave = () => flush.current();
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onLeave);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onLeave);
+      flush.current();
+    };
+  }, []);
 
   useEffect(() => {
     document.title = `${fileName} - Sheets`;
   }, [fileName]);
 
-  // A file picked on Home opens into this new document.
-  useEffect(() => {
-    if (!initialFile) return;
-    onInitialFileOpened();
-    void loadFile(initialFile);
-  }, []);
-  const saveStatus: SaveStatus = revision !== savedRevision && revision > 0 ? "saving" : saveFailed ? "failed" : "saved";
+  const saveStatus: SaveStatus = revision !== savedRevision ? "saving" : saveFailed ? "failed" : "saved";
 
   // ---- editing
 
@@ -749,32 +797,9 @@ export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbo
 
   // ---- files
 
-  function replaceDocument(next: SheetsDocument, name: string) {
-    doc.free();
-    setDoc(next);
-    setFileName(name);
-    setSheet(0);
-    setSelection(single({ row: 0, col: 0 }));
-    setEditing(null);
-    changed();
-  }
-
   async function open() {
     const file = await pickFile(".xlsx,.csv");
     if (file) onOpenFile(file);
-  }
-
-  async function loadFile(file: File) {
-    const base = file.name.replace(/\.[^.]+$/, "");
-    try {
-      if (file.name.toLowerCase().endsWith(".csv")) {
-        replaceDocument(SheetsDocument.fromCsv(await file.text()), base);
-      } else {
-        replaceDocument(SheetsDocument.fromXlsx(new Uint8Array(await file.arrayBuffer())), base);
-      }
-    } catch (err) {
-      alert(`Could not open ${file.name}: ${err instanceof Error ? err.message : String(err)}`);
-    }
   }
 
   function newDocument() {

@@ -8,7 +8,7 @@ import { newDocumentId, type AppKind, type RecentDocument } from "./documents";
 import { ComingSoon } from "./home/ComingSoon";
 import { HomePage } from "./home/HomePage";
 import { navigate, useRoute } from "./router";
-import { SheetsApp } from "./sheets/SheetsApp";
+import { SheetsLoader } from "./sheets/SheetsLoader";
 
 export function App() {
   const route = useRoute();
@@ -50,7 +50,7 @@ export function App() {
         {route.page === "sheets" && engine === "loading" && <p className="placeholder">Loading…</p>}
         {route.page === "sheets" && engine instanceof Error && <p className="placeholder">Could not start: {engine.message}</p>}
         {route.page === "sheets" && engine === "ready" && route.docId && (
-          <SheetsApp
+          <SheetsLoader
             key={route.docId}
             docId={route.docId}
             initialFile={pendingFile?.docId === route.docId ? pendingFile.file : undefined}

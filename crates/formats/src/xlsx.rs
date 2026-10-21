@@ -25,13 +25,12 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
 
 use office_core::{OfficeError, Result};
-use quick_xml::escape::resolve_predefined_entity;
-use quick_xml::events::{BytesStart, Event};
-use quick_xml::{Reader, XmlVersion};
 use sheets_engine::{Align, CellRef, ErrorKind, NumberFormat, Sheet, Style, VAlign, Value, Workbook};
 use sheets_engine::{BorderLine, BorderStyle, Borders, Side};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
+
+use crate::xml::{attr, walk, XmlEvent};
 
 #[path = "xlsx_layout.rs"]
 mod layout;
@@ -98,13 +97,18 @@ pub fn read(bytes: &[u8]) -> Result<Workbook> {
         None => Vec::new(),
     };
 
+    let shared = SharedStrings::new(shared);
     let mut book = Workbook::empty();
     for (name, rid) in sheet_list(&workbook_xml) {
         let Some(rel) = rels.iter().find(|r| r.id == rid) else { continue };
+        let t0 = Timer::start();
         let xml = part(&mut zip, &resolve(&rel.target))?.unwrap_or_default();
+        let t1 = Timer::start();
         let data = sheet_data(&xml, &shared);
+        drop(xml);
+        let t2 = Timer::start();
         let mut sheet = Sheet::new();
-        // Styles first, so typed-format detection doesn't override them.
+        // Styles first: a cell formatted as Text keeps its input as text.
         for (at, index) in data.styles {
             if let Some(style) = styles.get(index) {
                 sheet.set_style(at, style.clone());
@@ -113,8 +117,12 @@ pub fn read(bytes: &[u8]) -> Result<Workbook> {
         for (col, width) in data.widths {
             sheet.set_col_width(col, Some(width));
         }
-        sheet.set_inputs(data.cells);
-        *sheet.layout_mut() = layout::read(&xml);
+        let cells = data.cells.len();
+        sheet.load_cells(data.cells);
+        *sheet.layout_mut() = data.layout;
+        Timer::report(|| {
+            format!("{name}: unzip {}, parse {} ({cells} cells), load+calc {}", t0.ms(), t1.ms(), t2.ms())
+        });
         book.push_sheet(name, sheet);
     }
     if book.sheets.is_empty() {
@@ -183,22 +191,47 @@ fn shared_strings(xml: &str) -> Vec<String> {
 
 #[derive(Default)]
 struct SheetData {
-    /// (position, input string) ready for `Sheet::set_inputs`.
-    cells: Vec<(CellRef, String)>,
+    /// (position, input, typed value) ready for `Sheet::load_cells`. The value
+    /// is `None` for formulas, which the sheet parses and calculates; the input
+    /// is `None` when it is just the value written back.
+    cells: Vec<(CellRef, Option<String>, Option<Value>)>,
     /// (position, index into cellXfs)
     styles: Vec<(CellRef, usize)>,
     /// (column, width in pixels)
     widths: Vec<(u32, f64)>,
+    layout: sheets_engine::layout::SheetLayout,
 }
 
-fn sheet_data(xml: &str, shared: &[String]) -> SheetData {
-    #[derive(Default)]
-    struct C {
-        at: Option<CellRef>,
-        kind: String,
-        formula: String,
-        value: String,
-        inline: String,
+/// Shared strings, with the input of the few that need a leading `'` worked out once.
+struct SharedStrings {
+    text: Vec<String>,
+    input: Vec<Option<String>>,
+}
+
+impl SharedStrings {
+    fn new(text: Vec<String>) -> Self {
+        let input = text.iter().map(|s| text_cell_input(s)).collect();
+        SharedStrings { text, input }
+    }
+}
+
+/// The input to store for a text cell: `None` when it is the text itself.
+fn text_cell_input(s: &str) -> Option<String> {
+    (!Value::text_round_trips(s)).then(|| format!("'{s}"))
+}
+
+/// One pass over a worksheet: cells, styles, column widths and the layout
+/// (row heights, hidden lines, merges, frozen panes). Hot loop for big
+/// files, so it reuses its buffers instead of allocating per cell.
+fn sheet_data(xml: &str, shared: &SharedStrings) -> SheetData {
+    #[derive(Clone, Copy, PartialEq)]
+    enum Kind {
+        Number,
+        Shared,
+        Str,
+        Inline,
+        Bool,
+        Error,
     }
     #[derive(Clone, Copy, PartialEq)]
     enum In {
@@ -208,76 +241,109 @@ fn sheet_data(xml: &str, shared: &[String]) -> SheetData {
         InlineT,
     }
     let mut out = SheetData::default();
-    let mut c = C::default();
+    let mut layout = layout::LayoutReader::default();
+    let (mut formula, mut value, mut inline) = (String::new(), String::new(), String::new());
+    let mut at: Option<CellRef> = None;
+    let mut kind = Kind::Number;
     let mut inside = In::None;
     let (mut row, mut next_col) = (0u32, 0u32);
-    walk(xml, |ev| match ev {
-        XmlEvent::Start { name: "col", attrs } => {
-            let (Ok(min), Ok(max), Ok(width)) = (
-                attr(attrs, "min").parse::<u32>(),
-                attr(attrs, "max").parse::<u32>(),
-                attr(attrs, "width").parse::<f64>(),
-            ) else {
+    walk(xml, |ev| {
+        match ev {
+            XmlEvent::Start { name: "c", attrs } => {
+                let cell = CellRef::parse(&attr(attrs, "r")).unwrap_or(CellRef::new(row, next_col));
+                next_col = cell.col + 1;
+                if let Ok(index) = attr(attrs, "s").parse::<usize>() {
+                    if index > 0 {
+                        out.styles.push((cell, index));
+                    }
+                }
+                kind = match &*attr(attrs, "t") {
+                    "s" => Kind::Shared,
+                    "str" => Kind::Str,
+                    "inlineStr" => Kind::Inline,
+                    "b" => Kind::Bool,
+                    "e" => Kind::Error,
+                    _ => Kind::Number,
+                };
+                at = Some(cell);
+                formula.clear();
+                value.clear();
+                inline.clear();
                 return;
-            };
-            // Whole-sheet column defaults (max = 16384) aren't worth expanding.
-            if min >= 1 && max >= min && max - min < 1000 {
-                for col in min..=max {
-                    out.widths.push((col - 1, chars_to_px(width)));
+            }
+            XmlEvent::Start { name: "v", .. } => inside = In::V,
+            XmlEvent::Start { name: "f", .. } => inside = In::F,
+            XmlEvent::Start { name: "t", .. } if kind == Kind::Inline => inside = In::InlineT,
+            XmlEvent::End { name: "f" | "v" | "t" } => inside = In::None,
+            XmlEvent::Text(t) => {
+                match inside {
+                    In::F => formula.push_str(t),
+                    In::V => value.push_str(t),
+                    In::InlineT => inline.push_str(t),
+                    In::None => {}
+                }
+                return;
+            }
+            XmlEvent::End { name: "c" } => {
+                let Some(cell) = at.take() else { return };
+                let text = |s: &str| (text_cell_input(s), Some(Value::Text(s.to_string())));
+                let loaded = if !formula.is_empty() {
+                    Some((Some(format!("={}", strip_function_prefixes(&formula))), None))
+                } else {
+                    let v = value.trim();
+                    match kind {
+                        Kind::Shared => v
+                            .parse::<usize>()
+                            .ok()
+                            .filter(|i| *i < shared.text.len())
+                            .map(|i| (shared.input[i].clone(), Some(Value::Text(shared.text[i].clone())))),
+                        Kind::Inline if inline.is_empty() => None,
+                        Kind::Inline => Some(text(&inline)),
+                        Kind::Str if value.is_empty() => None,
+                        Kind::Str => Some(text(&value)),
+                        Kind::Bool => Some((None, Some(Value::Bool(v == "1" || v.eq_ignore_ascii_case("true"))))),
+                        Kind::Error => Some(
+                            ErrorKind::parse(v).map_or((Some(v.to_string()), None), |e| (None, Some(Value::Error(e)))),
+                        ),
+                        Kind::Number if v.is_empty() => None,
+                        Kind::Number => Some(
+                            v.parse::<f64>().map_or((Some(v.to_string()), None), |n| (None, Some(Value::Number(n)))),
+                        ),
+                    }
+                };
+                if let Some((input, typed)) = loaded {
+                    out.cells.push((cell, input, typed));
+                }
+                return;
+            }
+            XmlEvent::Start { name: "col", attrs } => {
+                let (Ok(min), Ok(max), Ok(width)) = (
+                    attr(attrs, "min").parse::<u32>(),
+                    attr(attrs, "max").parse::<u32>(),
+                    attr(attrs, "width").parse::<f64>(),
+                ) else {
+                    layout.event(ev);
+                    return;
+                };
+                // Whole-sheet column defaults (max = 16384) aren't worth expanding.
+                if min >= 1 && max >= min && max - min < 1000 {
+                    for col in min..=max {
+                        out.widths.push((col - 1, chars_to_px(width)));
+                    }
                 }
             }
-        }
-        XmlEvent::Start { name: "row", attrs } => {
-            if let Ok(r) = attr(attrs, "r").parse::<u32>() {
-                row = r.saturating_sub(1);
-            }
-            next_col = 0;
-        }
-        XmlEvent::End { name: "row" } => row += 1,
-        XmlEvent::Start { name: "c", attrs } => {
-            let at = CellRef::parse(attr(attrs, "r")).unwrap_or(CellRef::new(row, next_col));
-            next_col = at.col + 1;
-            if let Ok(index) = attr(attrs, "s").parse::<usize>() {
-                if index > 0 {
-                    out.styles.push((at, index));
+            XmlEvent::Start { name: "row", attrs } => {
+                if let Ok(r) = attr(attrs, "r").parse::<u32>() {
+                    row = r.saturating_sub(1);
                 }
+                next_col = 0;
             }
-            c = C { at: Some(at), kind: attr(attrs, "t").to_string(), ..C::default() };
+            XmlEvent::End { name: "row" } => row += 1,
+            _ => {}
         }
-        XmlEvent::Start { name: "f", .. } => inside = In::F,
-        XmlEvent::Start { name: "v", .. } => inside = In::V,
-        XmlEvent::Start { name: "t", .. } if c.kind == "inlineStr" => inside = In::InlineT,
-        XmlEvent::End { name: "f" | "v" | "t" } => inside = In::None,
-        XmlEvent::Text(t) => match inside {
-            In::F => c.formula.push_str(t),
-            In::V => c.value.push_str(t),
-            In::InlineT => c.inline.push_str(t),
-            In::None => {}
-        },
-        XmlEvent::End { name: "c" } => {
-            let input = if !c.formula.is_empty() {
-                format!("={}", strip_function_prefixes(&c.formula))
-            } else {
-                match c.kind.as_str() {
-                    "s" => c
-                        .value
-                        .trim()
-                        .parse::<usize>()
-                        .ok()
-                        .and_then(|i| shared.get(i))
-                        .map_or(String::new(), |s| text_input(s)),
-                    "inlineStr" => text_input(&c.inline),
-                    "str" => text_input(&c.value),
-                    "b" => if c.value.trim() == "1" { "TRUE" } else { "FALSE" }.to_string(),
-                    _ => c.value.trim().to_string(),
-                }
-            };
-            if let (Some(at), false) = (c.at, input.is_empty()) {
-                out.cells.push((at, input));
-            }
-        }
-        _ => {}
+        layout.event(ev);
     });
+    out.layout = layout.finish();
     out
 }
 
@@ -366,7 +432,7 @@ fn read_styles(xml: &str) -> Vec<Style> {
                 "i" => font.italic = on,
                 "strike" => font.strike = on,
                 "u" => font.underline = attr(attrs, "val") != "none",
-                "color" => font.color = argb(attr(attrs, "rgb")),
+                "color" => font.color = argb(&attr(attrs, "rgb")),
                 "name" => font.name = Some(attr(attrs, "val").to_string()),
                 "sz" => font.size = attr(attrs, "val").parse::<f64>().ok().map(|pt| (pt * 10.0).round() as u16),
                 _ => {}
@@ -383,7 +449,7 @@ fn read_styles(xml: &str) -> Vec<Style> {
             pattern_solid = attr(attrs, "patternType") == "solid"
         }
         XmlEvent::Start { name: "fgColor", attrs } if in_fill && pattern_solid => {
-            *fills.last_mut().unwrap() = argb(attr(attrs, "rgb"));
+            *fills.last_mut().unwrap() = argb(&attr(attrs, "rgb"));
         }
         XmlEvent::Start { name: "cellXfs", .. } => in_cell_xfs = true,
         XmlEvent::End { name: "cellXfs" } => in_cell_xfs = false,
@@ -412,14 +478,14 @@ fn read_styles(xml: &str) -> Vec<Style> {
         }
         XmlEvent::Start { name: "alignment", attrs } if in_cell_xfs => {
             if let Some(style) = out.last_mut() {
-                style.align = match attr(attrs, "horizontal") {
+                style.align = match &*attr(attrs, "horizontal") {
                     "left" => Some(Align::Left),
                     "center" | "centerContinuous" => Some(Align::Center),
                     "right" => Some(Align::Right),
                     _ => None,
                 };
-                style.wrap = matches!(attr(attrs, "wrapText"), "1" | "true");
-                style.valign = match attr(attrs, "vertical") {
+                style.wrap = matches!(&*attr(attrs, "wrapText"), "1" | "true");
+                style.valign = match &*attr(attrs, "vertical") {
                     "top" | "justify" => VAlign::Top,
                     "center" | "distributed" => VAlign::Center,
                     _ => VAlign::Bottom,
@@ -459,11 +525,11 @@ impl BorderReader {
                 };
                 if let Some(side) = side {
                     self.side = Some(side);
-                    let line = BorderStyle::from_name(attr(attrs, "style")).map(|s| BorderLine::new(s, None));
+                    let line = BorderStyle::from_name(&attr(attrs, "style")).map(|s| BorderLine::new(s, None));
                     *self.list.last_mut().unwrap().side_mut(side) = line;
                 } else if let (Some(side), "color") = (self.side, *name) {
                     if let Some(line) = self.list.last_mut().unwrap().side_mut(side) {
-                        line.color = argb(attr(attrs, "rgb")).filter(|c| c != "#000000");
+                        line.color = argb(&attr(attrs, "rgb")).filter(|c| c != "#000000");
                     }
                 }
             }
@@ -503,13 +569,38 @@ fn argb(s: &str) -> Option<String> {
     hex.chars().all(|c| c.is_ascii_hexdigit()).then(|| format!("#{}", hex.to_ascii_uppercase()))
 }
 
-/// Text that would be misread as a number, boolean or formula gets a leading `'`.
-fn text_input(s: &str) -> String {
-    Value::Text(s.to_string()).to_input()
-}
-
 fn strip_function_prefixes(formula: &str) -> String {
     formula.replace("_xlfn.", "").replace("_xlws.", "")
+}
+
+/// Phase timings for `OFFICE_PROFILE=1` runs of the native benchmarks. A no-op in
+/// WebAssembly, where `std::time::Instant` isn't available (it would panic).
+struct Timer(#[cfg(not(target_arch = "wasm32"))] std::time::Instant);
+
+impl Timer {
+    fn start() -> Timer {
+        Timer(
+            #[cfg(not(target_arch = "wasm32"))]
+            std::time::Instant::now(),
+        )
+    }
+
+    /// Milliseconds since `start`, as text.
+    fn ms(&self) -> String {
+        #[cfg(not(target_arch = "wasm32"))]
+        return format!("{}ms", self.0.elapsed().as_millis());
+        #[cfg(target_arch = "wasm32")]
+        String::new()
+    }
+
+    fn report(message: impl FnOnce() -> String) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if std::env::var_os("OFFICE_PROFILE").is_some() {
+            eprintln!("  {}", message());
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = message;
+    }
 }
 
 // ---------------------------------------------------------------- writing
@@ -518,6 +609,7 @@ pub fn write(book: &Workbook) -> Result<Vec<u8>> {
     let mut parts: Vec<(String, String)> = Vec::new();
     let n = book.sheets.len();
     let mut styles = StyleTable::default();
+    let mut strings = SharedStringTable::default();
 
     let mut types = String::from(concat!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
@@ -553,25 +645,40 @@ pub fn write(book: &Workbook) -> Result<Vec<u8>> {
         rels.push_str(&format!(
             r#"<Relationship Id="rId{id}" Type="{NS_REL}/worksheet" Target="worksheets/sheet{id}.xml"/>"#
         ));
-        parts.push((format!("xl/worksheets/sheet{id}.xml"), worksheet_xml(&ws.sheet, &mut styles)));
+        parts.push((format!("xl/worksheets/sheet{id}.xml"), worksheet_xml(&ws.sheet, &mut styles, &mut strings)));
     }
     // Ask Excel to recalculate on open, since our cached values may differ slightly.
     workbook.push_str(r#"</sheets><calcPr calcId="0" fullCalcOnLoad="1"/></workbook>"#);
-    rels.push_str(&format!(
-        r#"<Relationship Id="rId{}" Type="{NS_REL}/styles" Target="styles.xml"/></Relationships>"#,
-        n + 1
-    ));
+    rels.push_str(&format!(r#"<Relationship Id="rId{}" Type="{NS_REL}/styles" Target="styles.xml"/>"#, n + 1));
+    if !strings.list.is_empty() {
+        rels.push_str(&format!(
+            r#"<Relationship Id="rId{}" Type="{NS_REL}/sharedStrings" Target="sharedStrings.xml"/>"#,
+            n + 2
+        ));
+        parts.push(("xl/sharedStrings.xml".into(), strings.to_xml()));
+        // Register the part in [Content_Types].xml (the first part).
+        parts[0].1 = parts[0].1.replace(
+            "</Types>",
+            r#"<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>"#,
+        );
+    }
+    rels.push_str("</Relationships>");
     parts.push(("xl/workbook.xml".into(), workbook));
     parts.push(("xl/_rels/workbook.xml.rels".into(), rels));
     parts.push(("xl/styles.xml".into(), styles.finish_xml()));
 
+    let t_zip = Timer::start();
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
-    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    // Level 3: about twice as fast as the default for files nearly as small.
+    let options =
+        SimpleFileOptions::default().compression_method(CompressionMethod::Deflated).compression_level(Some(3));
     for (name, xml) in parts {
         zip.start_file(name, options).map_err(|e| OfficeError::Io(e.to_string()))?;
         zip.write_all(xml.as_bytes()).map_err(|e| OfficeError::Io(e.to_string()))?;
     }
-    Ok(zip.finish().map_err(|e| OfficeError::Io(e.to_string()))?.into_inner())
+    let bytes = zip.finish().map_err(|e| OfficeError::Io(e.to_string()))?.into_inner();
+    Timer::report(|| format!("zip {}", t_zip.ms()));
+    Ok(bytes)
 }
 
 /// (bold, italic, underline, strike, colour, name, size in tenths of a point).
@@ -581,6 +688,8 @@ type FontKey = (bool, bool, bool, bool, Option<String>, Option<String>, Option<u
 /// `styles.xml`. Index 0 of every list is Excel's required default entry.
 #[derive(Default)]
 struct StyleTable {
+    /// Style -> its index in `xfs` plus one, so lookups don't scan the list.
+    lookup: rustc_hash::FxHashMap<Style, usize>,
     xfs: Vec<Style>,
     fonts: Vec<FontKey>,
     fills: Vec<String>,
@@ -595,13 +704,12 @@ impl StyleTable {
         if style.is_default() {
             return 0;
         }
-        match self.xfs.iter().position(|s| s == style) {
-            Some(i) => i + 1,
-            None => {
-                self.xfs.push(style.clone());
-                self.xfs.len()
-            }
+        if let Some(i) = self.lookup.get(style) {
+            return *i;
         }
+        self.xfs.push(style.clone());
+        self.lookup.insert(style.clone(), self.xfs.len());
+        self.xfs.len()
     }
 
     fn finish_xml(&mut self) -> String {
@@ -736,18 +844,23 @@ fn position_or_push<T: PartialEq>(list: &mut Vec<T>, item: T) -> usize {
     }
 }
 
-fn worksheet_xml(sheet: &Sheet, styles: &mut StyleTable) -> String {
-    let mut xml = format!(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="{NS_MAIN}">"#);
+fn worksheet_xml<'a>(sheet: &'a Sheet, styles: &mut StyleTable, strings: &mut SharedStringTable<'a>) -> String {
+    let positions = {
+        // Cells with content plus formatted empty cells, row by row.
+        let mut p: Vec<CellRef> = sheet.cell_positions();
+        p.extend(sheet.styled_cells().into_iter().map(|(at, _)| at));
+        p.sort_unstable();
+        p.dedup();
+        p
+    };
+    // About 40 bytes of XML per cell; reserving avoids repeated copying of a huge string.
+    let mut xml = String::with_capacity(positions.len() * 40 + 1024);
+    xml.push_str(&format!(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="{NS_MAIN}">"#));
     xml.push_str(&layout::sheet_views_xml(sheet));
     xml.push_str(&layout::sheet_format_xml(sheet));
     xml.push_str(&layout::cols_xml(sheet));
     xml.push_str("<sheetData>");
     let mut rows = layout::RowWriter::new(sheet);
-    // Cells with content plus formatted empty cells, row by row.
-    let mut positions: Vec<CellRef> = sheet.cells().into_iter().map(|(at, _, _)| at).collect();
-    positions.extend(sheet.styled_cells().into_iter().map(|(at, _)| at));
-    positions.sort();
-    positions.dedup();
     let mut current_row = None;
     for at in positions {
         if current_row != Some(at.row) {
@@ -759,7 +872,7 @@ fn worksheet_xml(sheet: &Sheet, styles: &mut StyleTable) -> String {
             current_row = Some(at.row);
         }
         let s = styles.index(sheet.style(at));
-        xml.push_str(&cell_xml(at, sheet.input(at), sheet.value(at), s));
+        write_cell(&mut xml, at, sheet.formula_input(at), sheet.value(at), s, strings);
     }
     if current_row.is_some() {
         xml.push_str("</row>");
@@ -771,26 +884,138 @@ fn worksheet_xml(sheet: &Sheet, styles: &mut StyleTable) -> String {
     xml
 }
 
-fn cell_xml(at: CellRef, input: &str, value: &Value, style: usize) -> String {
-    // `r="A1"` plus the style index when the cell is formatted.
-    let r = if style == 0 { format!(r#"r="{at}""#) } else { format!(r#"r="{at}" s="{style}""#) };
-    if let Some(formula) = input.strip_prefix('=') {
-        let f = escape(&add_function_prefixes(formula));
-        return match value {
-            Value::Number(n) => format!(r#"<c {r}><f>{f}</f><v>{n}</v></c>"#),
-            Value::Text(s) => format!(r#"<c {r} t="str"><f>{f}</f><v>{}</v></c>"#, escape(s)),
-            Value::Bool(b) => format!(r#"<c {r} t="b"><f>{f}</f><v>{}</v></c>"#, *b as u8),
-            Value::Error(e) => format!(r#"<c {r} t="e"><f>{f}</f><v>{}</v></c>"#, excel_error(*e)),
-            Value::Empty => format!(r#"<c {r}><f>{f}</f></c>"#),
-        };
+/// Append one `<c>` element. Hot path when saving big sheets: writes straight
+/// into `xml` without building intermediate strings.
+fn write_cell<'a>(
+    xml: &mut String,
+    at: CellRef,
+    formula: Option<&str>,
+    value: &'a Value,
+    style: usize,
+    strings: &mut SharedStringTable<'a>,
+) {
+    use std::fmt::Write as _;
+    if formula.is_none() && value.is_empty() && style == 0 {
+        return;
+    }
+    xml.push_str("<c r=\"");
+    push_cell_ref(xml, at);
+    xml.push('"');
+    if style > 0 {
+        let _ = write!(xml, " s=\"{style}\"");
+    }
+    if let Some(formula) = formula.and_then(|f| f.strip_prefix('=')) {
+        xml.push_str(match value {
+            Value::Text(_) => " t=\"str\"><f>",
+            Value::Bool(_) => " t=\"b\"><f>",
+            Value::Error(_) => " t=\"e\"><f>",
+            _ => "><f>",
+        });
+        escape_into(xml, &add_function_prefixes(formula));
+        xml.push_str("</f>");
+        match value {
+            Value::Number(n) => {
+                let _ = write!(xml, "<v>{n}</v>");
+            }
+            Value::Text(t) => {
+                xml.push_str("<v>");
+                escape_into(xml, t);
+                xml.push_str("</v>");
+            }
+            Value::Bool(b) => {
+                let _ = write!(xml, "<v>{}</v>", *b as u8);
+            }
+            Value::Error(e) => {
+                let _ = write!(xml, "<v>{}</v>", excel_error(*e));
+            }
+            Value::Empty => {}
+        }
+        xml.push_str("</c>");
+        return;
     }
     match value {
-        Value::Number(n) => format!(r#"<c {r}><v>{n}</v></c>"#),
-        Value::Text(s) => format!(r#"<c {r} t="inlineStr"><is><t xml:space="preserve">{}</t></is></c>"#, escape(s)),
-        Value::Bool(b) => format!(r#"<c {r} t="b"><v>{}</v></c>"#, *b as u8),
-        Value::Error(e) => format!(r#"<c {r} t="e"><v>{}</v></c>"#, excel_error(*e)),
-        Value::Empty if style > 0 => format!(r#"<c {r}/>"#),
-        Value::Empty => String::new(),
+        Value::Number(n) => {
+            let _ = write!(xml, "><v>{n}</v></c>");
+        }
+        Value::Text(t) => {
+            let _ = write!(xml, " t=\"s\"><v>{}</v></c>", strings.id(t));
+        }
+        Value::Bool(b) => {
+            let _ = write!(xml, " t=\"b\"><v>{}</v></c>", *b as u8);
+        }
+        Value::Error(e) => {
+            let _ = write!(xml, " t=\"e\"><v>{}</v></c>", excel_error(*e));
+        }
+        Value::Empty => xml.push_str("/>"),
+    }
+}
+
+/// "AB12" without allocating.
+fn push_cell_ref(xml: &mut String, at: CellRef) {
+    use std::fmt::Write as _;
+    let mut letters = [0u8; 3];
+    let mut n = at.col + 1;
+    let mut i = 3;
+    while n > 0 {
+        i -= 1;
+        letters[i] = b'A' + ((n - 1) % 26) as u8;
+        n = (n - 1) / 26;
+    }
+    xml.push_str(std::str::from_utf8(&letters[i..]).unwrap_or("A"));
+    let _ = write!(xml, "{}", at.row + 1);
+}
+
+/// XML-escape `s` onto the end of `xml`.
+fn escape_into(xml: &mut String, s: &str) {
+    if !s.contains(['&', '<', '>', '"']) {
+        xml.push_str(s);
+        return;
+    }
+    for ch in s.chars() {
+        match ch {
+            '&' => xml.push_str("&amp;"),
+            '<' => xml.push_str("&lt;"),
+            '>' => xml.push_str("&gt;"),
+            '"' => xml.push_str("&quot;"),
+            c => xml.push(c),
+        }
+    }
+}
+
+/// Text values written once to `xl/sharedStrings.xml` and referenced by index,
+/// as Excel does: smaller files, and faster to open.
+#[derive(Default)]
+struct SharedStringTable<'a> {
+    index: rustc_hash::FxHashMap<&'a str, usize>,
+    list: Vec<&'a str>,
+    uses: usize,
+}
+
+impl<'a> SharedStringTable<'a> {
+    fn id(&mut self, s: &'a str) -> usize {
+        self.uses += 1;
+        if let Some(i) = self.index.get(s) {
+            return *i;
+        }
+        self.list.push(s);
+        self.index.insert(s, self.list.len() - 1);
+        self.list.len() - 1
+    }
+
+    fn to_xml(&self) -> String {
+        let mut xml = String::with_capacity(self.list.iter().map(|s| s.len() + 40).sum::<usize>() + 256);
+        xml.push_str(&format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="{NS_MAIN}" count="{}" uniqueCount="{}">"#,
+            self.uses,
+            self.list.len()
+        ));
+        for s in &self.list {
+            xml.push_str(r#"<si><t xml:space="preserve">"#);
+            escape_into(&mut xml, s);
+            xml.push_str("</t></si>");
+        }
+        xml.push_str("</sst>");
+        xml
     }
 }
 
@@ -831,61 +1056,6 @@ fn add_function_prefixes(formula: &str) -> String {
 
 fn escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
-}
-
-// ---------------------------------------------------------------- XML helper
-
-/// The only place that talks to quick-xml. Element and attribute names have
-/// their namespace prefix removed (`r:id` -> `id`); text is unescaped.
-enum XmlEvent<'a> {
-    Start { name: &'a str, attrs: &'a [(String, String)] },
-    End { name: &'a str },
-    Text(&'a str),
-}
-
-fn walk(xml: &str, mut on: impl FnMut(&XmlEvent)) {
-    let v = XmlVersion::Implicit1_0;
-    let mut reader = Reader::from_str(xml);
-    loop {
-        // Malformed XML ends the walk; whatever was read so far is kept.
-        let Ok(event) = reader.read_event() else { return };
-        match event {
-            Event::Start(e) => start(&e, false, &mut on),
-            Event::Empty(e) => start(&e, true, &mut on),
-            Event::End(e) => on(&XmlEvent::End { name: e.local_name().as_ref() }),
-            Event::Text(t) => on(&XmlEvent::Text(&t.xml_content(v))),
-            Event::CData(t) => on(&XmlEvent::Text(&t.xml_content(v))),
-            Event::GeneralRef(r) => {
-                let text = match r.resolve_char_ref() {
-                    Ok(Some(ch)) => ch.to_string(),
-                    _ => resolve_predefined_entity(&r.xml_content(v)).unwrap_or_default().to_string(),
-                };
-                on(&XmlEvent::Text(&text));
-            }
-            Event::Eof => return,
-            _ => {}
-        }
-    }
-}
-
-fn start(e: &BytesStart, is_empty: bool, on: &mut impl FnMut(&XmlEvent)) {
-    let name = e.local_name();
-    let attrs: Vec<(String, String)> = e
-        .attributes()
-        .flatten()
-        .map(|a| {
-            let value = a.normalized_value(XmlVersion::Implicit1_0).map(|c| c.into_owned()).unwrap_or_default();
-            (a.key.local_name().as_ref().to_string(), value)
-        })
-        .collect();
-    on(&XmlEvent::Start { name: name.as_ref(), attrs: &attrs });
-    if is_empty {
-        on(&XmlEvent::End { name: name.as_ref() });
-    }
-}
-
-fn attr<'a>(attrs: &'a [(String, String)], key: &str) -> &'a str {
-    attrs.iter().find(|(k, _)| k == key).map_or("", |(_, v)| v.as_str())
 }
 
 #[cfg(test)]

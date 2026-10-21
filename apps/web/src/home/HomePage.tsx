@@ -187,8 +187,7 @@ export function HomePage({ onOpenDocument, onNew, onOpenFile }: Props) {
                           onClick={(e) => {
                             e.stopPropagation();
                             if (!confirm(`Remove "${d.name}" from this browser? This can't be undone.`)) return;
-                            removeDocument(d.id);
-                            setRecent(listRecent());
+                            void removeDocument(d.id).then(() => setRecent(listRecent()));
                           }}
                         >
                           ×

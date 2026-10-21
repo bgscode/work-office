@@ -26,6 +26,10 @@ call the same Rust crates natively instead of through WebAssembly.
 
 `apps/web/src/App.tsx` picks the page from the URL hash (`router.ts`): `#/` is the Home page (`home/HomePage.tsx`), `#/sheets/<document id>` opens a workbook. `documents.ts` stores every document's bytes (`.xlsx` for Sheets) and a Recent index in `localStorage`; Home lists them and the app autosaves into them. The title bar (`chrome/TitleBar.tsx`) belongs to the shell; each app fills its middle through a portal (`chrome/titleSlot.ts`).
 
+## Saving and opening
+
+`sheets/SheetsLoader.tsx` opens a workbook (from IndexedDB or a picked file) behind an "Opening…" screen. The document is wrapped by `sheets/journal.ts`, which records every call that changes it; autosave stores that journal in IndexedDB after each edit and rewrites the full `.xlsx` only when it is cheap or after a pause. Opening replays the journal over the last full save. Numbers and how to benchmark: [PERFORMANCE.md](PERFORMANCE.md).
+
 ## What happens when you type `=SUM(A1:A3)` and press Enter
 
 1. `Grid.tsx` (the focused cell input) reports the draft; `SheetsApp.tsx` commits it with
