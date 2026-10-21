@@ -37,7 +37,7 @@ import {
   type Selection,
 } from "./geometry";
 import { ColumnLayout } from "./layout";
-import { FILL_HANDLE_SIZE, colX, paint, rowY } from "./paint";
+import { CELL_FONT_SIZE, FILL_HANDLE_SIZE, colX, paint, rowY } from "./paint";
 import { FORMULA_BAR_ID, type EditState } from "./types";
 
 export type FillDirection = "down" | "up" | "right" | "left";
@@ -615,7 +615,7 @@ export function Grid(props: GridProps) {
           top: rowY(row, logicalScroll.top) * zoom,
           width: Math.max(layout.width(col) + 1, longestLine(draft) * 8 + 16) * zoom,
           height: (Math.max(1, draft.split("\n").length) * (ROW_HEIGHT - 4) + 5) * zoom,
-          fontSize: 13 * zoom,
+          fontSize: CELL_FONT_SIZE * zoom,
           lineHeight: `${(ROW_HEIGHT - 4) * zoom}px`,
         }}
         onChange={(e) =>

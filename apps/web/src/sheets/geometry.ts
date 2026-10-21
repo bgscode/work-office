@@ -1,10 +1,10 @@
 // Grid sizes and pure selection math. No React or engine imports here, so it
 // is easy to unit-test (see geometry.test.ts).
 
-export const ROW_HEIGHT = 22;
+export const ROW_HEIGHT = 20;
 
 export const HEADER_WIDTH = 50;
-export const HEADER_HEIGHT = 24;
+export const HEADER_HEIGHT = 20;
 export const MAX_ROWS = 1_048_576;
 export const MAX_COLS = 16_384;
 

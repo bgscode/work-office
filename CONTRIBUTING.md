@@ -67,6 +67,16 @@ Sheets UI files in `apps/web/src/sheets/`:
 
 Pure helpers have Vitest tests next to them (`*.test.ts`).
 
+### Add a ribbon command
+
+Commands are plain data (`RibbonCommand` in `packages/ui/src/Ribbon.tsx`):
+`{ id, label, onRun, group, icon, size, shortcut, title, active, menu, render }`.
+Put them in the Excel tab and group where Excel has them — groups in use:
+Clipboard, Font, Alignment, Number, Styles, Cells, Editing, Sort & Filter,
+Data Tools, Charts, Function Library, Window, Zoom, Print. Icons are inline SVGs
+in `packages/ui/src/icons.tsx` (16×16 grid). App chrome styles live in
+`apps/web/src/excel.css`; grid colours in `apps/web/src/sheets/paint.ts`.
+
 ## Before you open a pull request
 
 ```sh

@@ -8,6 +8,10 @@ See the [roadmap](docs/ROADMAP.md).
 
 ![Sheets](docs/images/sheets.png)
 
+## Home
+
+Opening the app shows a start page like Microsoft 365's: create a blank workbook, open or drop an `.xlsx`/`.csv` file, or reopen a recent file. Every workbook is saved in your browser automatically.
+
 ## Sheets today
 
 - Canvas grid with virtual scrolling up to Excel's limits (1,048,576 × 16,384), resizable columns

@@ -6,6 +6,10 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Added
 
+- Home page in the style of the Microsoft 365 start page: app rail, Start new tiles (blank workbook; document and presentation marked coming soon), open or drag-and-drop .xlsx/.csv, and Recent files with search and app filters. Every workbook is autosaved separately in the browser (up to 20) and listed in Recent. Apps open at `#/sheets/<id>`, so Back and refresh work. The title bar now has a Home button instead of the app switcher.
+
+- Excel look and feel: green title bar with file name, save status and Quick Access (save, undo, redo); ribbon with Excel's tabs and labelled groups, icons, split buttons, tooltips and collapse (Ctrl+F1); formula bar with Name Box dropdown, ✕/✓ and fx (Insert Function dialog); Excel grid defaults (64px columns, 20px rows, Calibri 11, green selection); Excel-style sheet tabs, status bar (mode, statistics, zoom slider), menus and dialogs.
+
 - Sheets: canvas grid with virtual scrolling, formula bar, multiple sheets, status bar (sum/count/average).
 - Sheets: formula engine with incremental recalculation, cycle detection and 46 functions.
 - Sheets: open/save `.xlsx` and `.csv`; copy/paste as tab-separated text; undo/redo.

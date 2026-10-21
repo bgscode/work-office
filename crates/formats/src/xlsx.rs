@@ -276,13 +276,19 @@ fn sheet_data(xml: &str, shared: &[String]) -> SheetData {
     out
 }
 
-/// Excel column width (in characters of the default font) to pixels, and back.
+/// Maximum digit width of Calibri 11 (Excel's default font) in pixels.
+const MAX_DIGIT_WIDTH: f64 = 7.0;
+
+/// `<col width>` to pixels. The stored width already includes Excel's 5px
+/// cell padding (ECMA-376 §18.3.1.13), so Excel's default 8.43-character
+/// column is stored as 9.140625 and is 64px wide.
 fn chars_to_px(width: f64) -> f64 {
-    (width * 7.0 + 5.0).round()
+    ((256.0 * width + (128.0 / MAX_DIGIT_WIDTH).trunc()) / 256.0 * MAX_DIGIT_WIDTH).trunc()
 }
 
+/// Pixels to `<col width>`, the inverse of `chars_to_px` for whole pixels.
 fn px_to_chars(px: f64) -> f64 {
-    ((px - 5.0) / 7.0 * 100.0).round() / 100.0
+    (px / MAX_DIGIT_WIDTH * 256.0).trunc() / 256.0
 }
 
 /// Built-in number format codes that files reference by id without defining them.
@@ -1043,5 +1049,17 @@ mod tests {
         assert_eq!(styles[3].valign, VAlign::Top);
         assert_eq!(styles[3].align, Some(Align::Left));
         assert!(!styles[3].wrap);
+    }
+
+    #[test]
+    fn column_widths_match_excel() {
+        // What Excel writes for its default column (8.43 characters).
+        assert_eq!(chars_to_px(9.140625), 64.0);
+        assert_eq!(px_to_chars(64.0), 9.140625);
+        // A 20-character column as Excel stores it.
+        assert_eq!(chars_to_px(20.7109375), 145.0);
+        for px in 8..=400 {
+            assert_eq!(chars_to_px(px_to_chars(px as f64)), px as f64, "{px}px");
+        }
     }
 }

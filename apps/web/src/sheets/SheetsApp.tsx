@@ -4,10 +4,10 @@
 // counter that tells the grid to repaint.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { SheetsDocument, functionList, parseStyle, type FunctionInfo } from "@office/engine";
+import { SheetsDocument, ValueKind, functionList, parseStyle, type FunctionInfo } from "@office/engine";
 import { Ribbon, type RibbonTab } from "@office/ui";
 import { download, pickFile } from "../files";
-import { clearDraft, loadDraft, saveDraft } from "./autosave";
+import { loadDocument, saveDocument } from "../documents";
 import { parseTsv, toTsv } from "./clipboard";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { FindBar, type FindOptions } from "./FindBar";
@@ -17,6 +17,7 @@ import { canInsertRef, closeParens, enclosingFunction, findRefs, wordAtCaret } f
 import {
   MAX_COLS,
   MAX_ROWS,
+  ROW_HEIGHT,
   clampToExtent,
   moveSelection,
   rangeName,
@@ -31,6 +32,12 @@ import { fontFor } from "./paint";
 import { NameBox } from "./NameBox";
 import { SheetTabs } from "./SheetTabs";
 import type { EditState } from "./types";
+import { MOD_KEY, insertFunctionText, statusMode, zoomToFit } from "./chrome";
+import { InsertFunctionDialog } from "./InsertFunctionDialog";
+import { ColumnLayout, DEFAULT_COL_WIDTH } from "./layout";
+import { StatusBar } from "./StatusBar";
+import { WorkbookTitle, type SaveStatus } from "./WorkbookTitle";
+import { Icon } from "@office/ui";
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 /** Listed first in autocomplete when they match, since most people want these. */
@@ -41,7 +48,7 @@ const popularity = (name: string) => {
 };
 
 const ZOOM_KEY = "office.sheets.zoom";
-const ZOOM_LEVELS = [0.5, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 2];
+const ZOOM_LEVELS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 function savedZoom(): number {
   try {
@@ -55,20 +62,31 @@ function savedZoom(): number {
 /** Formatting more cells than this at once is limited to the area holding data. */
 const MAX_FORMAT_CELLS = 200_000;
 
-function openInitialDocument(): { doc: SheetsDocument; name: string } {
-  const draft = loadDraft();
-  if (draft) {
+/** The workbook saved under `docId` in this browser, or a new empty one. */
+function openSavedDocument(docId: string): { doc: SheetsDocument; name: string } {
+  const saved = loadDocument(docId);
+  if (saved) {
     try {
-      return { doc: SheetsDocument.fromXlsx(draft.xlsx), name: draft.name };
+      return { doc: SheetsDocument.fromXlsx(saved.bytes), name: saved.name };
     } catch {
-      clearDraft();
+      // Unreadable: start empty rather than failing to open.
     }
   }
-  return { doc: new SheetsDocument(), name: "Untitled" };
+  return { doc: new SheetsDocument(), name: "Untitled workbook" };
 }
 
-export function SheetsApp() {
-  const [initial] = useState(openInitialDocument);
+interface SheetsAppProps {
+  /** Id this workbook is autosaved under (see documents.ts). */
+  docId: string;
+  /** A file to open into this new document, chosen on Home or via File > Open. */
+  initialFile?: File;
+  onInitialFileOpened: () => void;
+  onNewWorkbook: () => void;
+  onOpenFile: (file: File) => void;
+}
+
+export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbook, onOpenFile }: SheetsAppProps) {
+  const [initial] = useState(() => openSavedDocument(docId));
   const [doc, setDoc] = useState(initial.doc);
   const [fileName, setFileName] = useState(initial.name);
   const [sheet, setSheet] = useState(0);
@@ -89,6 +107,12 @@ export function SheetsApp() {
   const pasteValuesNext = useRef(false);
   const pendingCaret = useRef<number | null>(null);
   const lastCopiedText = useRef<string | null>(null);
+  // Excel chrome: Insert Function dialog, autosave status.
+  const [insertFunctionOpen, setInsertFunctionOpen] = useState(false);
+  /** The edit that was in progress when Insert Function opened; resumed when it closes. */
+  const suspendedEdit = useRef<EditState | null>(null);
+  const [savedRevision, setSavedRevision] = useState(0);
+  const [saveFailed, setSaveFailed] = useState(false);
   const changed = () => setRevision((r) => r + 1);
 
   const { row, col } = selection.anchor;
@@ -112,11 +136,34 @@ export function SheetsApp() {
 
   // ---- autosave: a second after the last change
 
+  const save = () => saveDocument(docId, "sheets", fileName, new Uint8Array(doc.toXlsx()));
   useEffect(() => {
     if (revision === 0) return;
-    const timer = setTimeout(() => saveDraft(fileName, doc.toXlsx()), 1000);
+    const timer = setTimeout(() => {
+      setSaveFailed(!save());
+      setSavedRevision(revision);
+    }, 1000);
     return () => clearTimeout(timer);
   }, [doc, revision, fileName]);
+
+  // Leaving the workbook (Home, Back, another file) saves pending changes right away.
+  const flush = useRef(() => {});
+  flush.current = () => {
+    if (revision > 0 && revision !== savedRevision) save();
+  };
+  useEffect(() => () => flush.current(), []);
+
+  useEffect(() => {
+    document.title = `${fileName} - Sheets`;
+  }, [fileName]);
+
+  // A file picked on Home opens into this new document.
+  useEffect(() => {
+    if (!initialFile) return;
+    onInitialFileOpened();
+    void loadFile(initialFile);
+  }, []);
+  const saveStatus: SaveStatus = revision !== savedRevision && revision > 0 ? "saving" : saveFailed ? "failed" : "saved";
 
   // ---- editing
 
@@ -137,10 +184,25 @@ export function SheetsApp() {
     const value = closeParens(editing.draft);
     if (value !== doc.input(sheet, row, col)) {
       doc.setInputs(sheet, Uint32Array.of(row), Uint32Array.of(col), [value]);
+      widenForNumber(row, col);
       changed();
     }
     setEditing(null);
     if (dRow || dCol) setSelection(moveSelection(selection, dRow, dCol, false));
+  }
+
+  /**
+   * Like Excel: when a number or date typed into a default-width column
+   * doesn't fit, the column widens instead of showing ####.
+   */
+  function widenForNumber(r: number, c: number) {
+    if (doc.kindBlock(sheet, r, c, 1, 1)[0] !== ValueKind.Number) return;
+    const widths = doc.columnWidths(sheet);
+    for (let i = 0; i < widths.length; i += 2) if (widths[i] === c) return; // user-set width: keep it
+    const ctx = document.createElement("canvas").getContext("2d")!;
+    ctx.font = fontFor(parseStyle(doc.styleBlock(sheet, r, c, 1, 1)[0]));
+    const needed = Math.ceil(ctx.measureText(doc.displayBlock(sheet, r, c, 1, 1)[0]).width + 10);
+    if (needed > DEFAULT_COL_WIDTH) doc.setColumnWidth(sheet, c, c, needed);
   }
 
   /** Ctrl+Enter: put the entry in every selected cell; formulas shift like a fill. */
@@ -498,6 +560,60 @@ export function SheetsApp() {
     if (doc.redo()) changed();
   }
 
+  // ---- Excel chrome: Insert Function, zoom to selection, chrome shortcuts
+
+  /** fx / Shift+F3. An edit in progress is set aside (not committed) while the dialog is open. */
+  function openInsertFunction() {
+    suspendedEdit.current = editing;
+    setEditing(null);
+    setInsertFunctionOpen(true);
+  }
+
+  function closeInsertFunction(f: FunctionInfo | null) {
+    setInsertFunctionOpen(false);
+    const before = suspendedEdit.current;
+    suspendedEdit.current = null;
+    if (!f) {
+      if (before) {
+        setEditing(before);
+        pendingCaret.current = before.caret;
+      }
+      return;
+    }
+    const next = insertFunctionText(before?.draft ?? null, before?.caret ?? 0, f.name);
+    setEditing({ draft: next.draft, caret: next.caret, source: before?.source ?? "cell", mode: "edit" });
+    pendingCaret.current = next.caret;
+    setAssistDismissedAt(null);
+    setAssistIndex(0);
+  }
+
+  function zoomToSelection() {
+    const el = document.querySelector<HTMLElement>(".grid-scroller");
+    if (!el) return;
+    const layout = new ColumnLayout(doc.columnWidths(sheet));
+    const width = layout.x(sel.right + 1) - layout.x(sel.left);
+    const height = (sel.bottom - sel.top + 1) * ROW_HEIGHT;
+    setZoom(zoomToFit(width, height, el.clientWidth, el.clientHeight));
+    goTo({ anchor: { row: sel.top, col: sel.left }, focus: { row: sel.bottom, col: sel.right } });
+  }
+
+  const chromeKeys = useRef<(e: globalThis.KeyboardEvent) => void>(() => {});
+  chromeKeys.current = (e) => {
+    if (e.key === "F3" && e.shiftKey && !insertFunctionOpen) {
+      e.preventDefault();
+      openInsertFunction();
+    } else if (e.key === "F11" && e.shiftKey) {
+      e.preventDefault();
+      if (editing) commit(0, 0);
+      addSheet();
+    }
+  };
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => chromeKeys.current(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // ---- files
 
   function replaceDocument(next: SheetsDocument, name: string) {
@@ -512,7 +628,10 @@ export function SheetsApp() {
 
   async function open() {
     const file = await pickFile(".xlsx,.csv");
-    if (!file) return;
+    if (file) onOpenFile(file);
+  }
+
+  async function loadFile(file: File) {
     const base = file.name.replace(/\.[^.]+$/, "");
     try {
       if (file.name.toLowerCase().endsWith(".csv")) {
@@ -526,9 +645,9 @@ export function SheetsApp() {
   }
 
   function newDocument() {
-    if (!confirm("Start a new, empty workbook? Download the current one first if you want to keep it.")) return;
-    clearDraft();
-    replaceDocument(new SheetsDocument(), "Untitled");
+    // The current workbook is autosaved and stays in Recent on Home.
+    flush.current();
+    onNewWorkbook();
   }
 
   // ---- menus
@@ -536,23 +655,24 @@ export function SheetsApp() {
   function cellMenu(x: number, y: number) {
     const mod = navigator.platform.startsWith("Mac") ? "⌘" : "Ctrl+";
     const items: MenuItem[] = [
-      { label: "Cut", shortcut: `${mod}X`, onRun: () => navigator.clipboard?.writeText(cut()) },
-      { label: "Copy", shortcut: `${mod}C`, onRun: () => navigator.clipboard?.writeText(copy()) },
-      { label: "Paste", shortcut: `${mod}V`, onRun: pasteFromMenu },
-      { label: "Paste values only", shortcut: `${mod}⇧V`, onRun: () => pasteSpecial("values", false), disabled: !doc.hasCopied() },
-      { label: "Paste formatting only", onRun: () => pasteSpecial("formats", false), disabled: !doc.hasCopied() },
-      { label: "Paste formulas only", onRun: () => pasteSpecial("formulas", false), disabled: !doc.hasCopied() },
+      { label: "Cut", shortcut: `${mod}X`, onRun: () => navigator.clipboard?.writeText(cut()), icon: "cut" },
+      { label: "Copy", shortcut: `${mod}C`, onRun: () => navigator.clipboard?.writeText(copy()), icon: "copy" },
+      { label: "Paste", shortcut: `${mod}V`, onRun: pasteFromMenu, icon: "paste" },
+      { label: "Paste values only", shortcut: `${mod}⇧V`, onRun: () => pasteSpecial("values", false), disabled: !doc.hasCopied(), icon: "pasteSpecial" },
+      { label: "Paste formatting only", onRun: () => pasteSpecial("formats", false), disabled: !doc.hasCopied(), icon: "formatPainter" },
+      { label: "Paste formulas only", onRun: () => pasteSpecial("formulas", false), disabled: !doc.hasCopied(), icon: "function" },
       { label: "Paste transposed", onRun: () => pasteSpecial("all", true), disabled: !doc.hasCopied() },
-      { label: "Insert row above", onRun: () => insertLines("rows", false), separatorBefore: true },
-      { label: "Insert row below", onRun: () => insertLines("rows", true) },
-      { label: "Insert column left", onRun: () => insertLines("cols", false) },
-      { label: "Insert column right", onRun: () => insertLines("cols", true) },
-      { label: "Delete rows", onRun: () => deleteLines("rows"), separatorBefore: true },
-      { label: "Delete columns", onRun: () => deleteLines("cols") },
-      { label: "Sort A → Z", onRun: () => sort(true), separatorBefore: true },
-      { label: "Sort Z → A", onRun: () => sort(false) },
-      { label: "Clear contents", shortcut: "Del", onRun: clear, separatorBefore: true },
+      { label: "Insert row above", onRun: () => insertLines("rows", false), separatorBefore: true, icon: "insertRowAbove" },
+      { label: "Insert row below", onRun: () => insertLines("rows", true), icon: "insertRowBelow" },
+      { label: "Insert column left", onRun: () => insertLines("cols", false), icon: "insertColumnLeft" },
+      { label: "Insert column right", onRun: () => insertLines("cols", true), icon: "insertColumnRight" },
+      { label: "Delete rows", onRun: () => deleteLines("rows"), separatorBefore: true, icon: "deleteRows" },
+      { label: "Delete columns", onRun: () => deleteLines("cols"), icon: "deleteColumns" },
+      { label: "Sort A → Z", onRun: () => sort(true), separatorBefore: true, icon: "sortAsc" },
+      { label: "Sort Z → A", onRun: () => sort(false), icon: "sortDesc" },
+      { label: "Clear contents", shortcut: "Del", onRun: clear, separatorBefore: true, icon: "clear" },
       { label: "Clear formatting", onRun: () => format("clear", "") },
+      { label: "Insert Function…", shortcut: "⇧F3", onRun: openInsertFunction, separatorBefore: true, icon: "function" },
     ];
     setMenu({ x, y, items });
   }
@@ -562,9 +682,10 @@ export function SheetsApp() {
       x,
       y,
       items: [
-        { label: "Rename", onRun: () => setRenamingTab(index) },
+        { label: "Rename", onRun: () => setRenamingTab(index), icon: "rename" },
         {
           label: "Delete sheet",
+          icon: "trash",
           disabled: doc.sheetNames().length <= 1,
           onRun: () => {
             if (!confirm(`Delete "${doc.sheetNames()[index]}"? You can undo this.`)) return;
@@ -581,70 +702,119 @@ export function SheetsApp() {
   // ---- ribbon
 
   const formatKind = activeStyle.fmt ?? "general";
+  // Tabs and groups follow Excel's Home / Insert / Formulas / Data / View
+  // layout; see CONTRIBUTING.md ("Add a ribbon command") for group names.
+  const copied = doc.hasCopied();
   const tabs: RibbonTab[] = [
     {
       id: "file",
       label: "File",
       commands: [
-        { id: "new", label: "New", onRun: newDocument },
-        { id: "open", label: "Open…", onRun: open },
-        { id: "save-xlsx", label: "Download .xlsx", onRun: () => download(new Uint8Array(doc.toXlsx()), `${fileName}.xlsx`, XLSX_MIME) },
-        { id: "save-csv", label: "Download .csv", onRun: () => download(doc.toCsv(sheet), `${fileName}.csv`, "text/csv") },
+        { id: "new", label: "New", title: "Start a new, empty workbook.", icon: "newDocument", size: "large", group: "Workbook", onRun: newDocument },
+        { id: "open", label: "Open…", title: "Open an .xlsx or .csv file from your computer.", icon: "open", size: "large", group: "Workbook", onRun: open },
+        {
+          id: "save-xlsx",
+          label: "Download .xlsx",
+          title: "Save a copy of the workbook as an Excel file.",
+          icon: "excelFile",
+          size: "large",
+          group: "Save a Copy",
+          onRun: () => download(new Uint8Array(doc.toXlsx()), `${fileName}.xlsx`, XLSX_MIME),
+        },
+        {
+          id: "save-csv",
+          label: "Download .csv",
+          title: "Save the current sheet as comma-separated values.",
+          icon: "csvFile",
+          size: "large",
+          group: "Save a Copy",
+          onRun: () => download(doc.toCsv(sheet), `${fileName}.csv`, "text/csv"),
+        },
       ],
     },
     {
       id: "home",
       label: "Home",
       commands: [
-        { id: "undo", label: "↶", title: "Undo (Ctrl+Z)", onRun: undo },
-        { id: "redo", label: "↷", title: "Redo (Ctrl+Y)", onRun: redo },
+        { id: "undo", label: "Undo", shortcut: `${MOD_KEY}Z`, icon: "undo", size: "small", group: "Undo", onRun: undo },
+        { id: "redo", label: "Redo", shortcut: `${MOD_KEY}Y`, icon: "redo", size: "small", group: "Undo", onRun: redo },
+        {
+          id: "paste",
+          label: "Paste",
+          shortcut: `${MOD_KEY}V`,
+          title: "Add content from the clipboard to the selected cells.",
+          icon: "paste",
+          size: "large",
+          group: "Clipboard",
+          onRun: pasteFromMenu,
+          menu: [
+            { id: "paste-all", label: "Paste", shortcut: `${MOD_KEY}V`, icon: "paste", onRun: pasteFromMenu },
+            { id: "paste-values", label: "Values", shortcut: `${MOD_KEY}⇧V`, icon: "pasteSpecial", disabled: !copied, onRun: () => pasteSpecial("values", false), separatorBefore: true },
+            { id: "paste-formulas", label: "Formulas", icon: "function", disabled: !copied, onRun: () => pasteSpecial("formulas", false) },
+            { id: "paste-formats", label: "Formatting", icon: "formatPainter", disabled: !copied, onRun: () => pasteSpecial("formats", false) },
+            { id: "paste-transpose", label: "Transpose", icon: "table", disabled: !copied, onRun: () => pasteSpecial("all", true) },
+          ],
+        },
+        { id: "cut", label: "Cut", shortcut: `${MOD_KEY}X`, icon: "cut", size: "small", group: "Clipboard", onRun: () => navigator.clipboard?.writeText(cut()) },
+        { id: "copy", label: "Copy", shortcut: `${MOD_KEY}C`, icon: "copy", size: "small", group: "Clipboard", onRun: () => navigator.clipboard?.writeText(copy()) },
         {
           id: "paste-special",
           label: "Paste special",
-          separatorBefore: true,
+          title: "Paste only values, formulas or formatting, or swap rows and columns.",
+          size: "small",
+          group: "Clipboard",
           render: () => (
-            <select
-              className="ribbon-select"
-              aria-label="Paste special"
-              value=""
-              onChange={(e) => {
-                const [mode, t] = e.target.value.split(":");
-                pasteSpecial(mode as "all" | "values" | "formulas" | "formats", t === "t");
-              }}
-            >
-              <option value="" disabled>
-                Paste special…
-              </option>
-              <option value="values">Values only</option>
-              <option value="formats">Formatting only</option>
-              <option value="formulas">Formulas only</option>
-              <option value="all:t">Transpose</option>
-            </select>
+            <label className="ribbon-select-wrap small">
+              <Icon name="pasteSpecial" />
+              <select
+                className="ribbon-select bare"
+                aria-label="Paste special"
+                value=""
+                onChange={(e) => {
+                  const [mode, t] = e.target.value.split(":");
+                  pasteSpecial(mode as "all" | "values" | "formulas" | "formats", t === "t");
+                }}
+              >
+                <option value="" disabled>
+                  Paste special…
+                </option>
+                <option value="values">Values only</option>
+                <option value="formats">Formatting only</option>
+                <option value="formulas">Formulas only</option>
+                <option value="all:t">Transpose</option>
+              </select>
+            </label>
           ),
         },
-        { id: "bold", label: "B", title: "Bold (Ctrl+B)", active: !!activeStyle.b, onRun: () => toggle("bold", !!activeStyle.b), separatorBefore: true },
-        { id: "italic", label: "I", title: "Italic (Ctrl+I)", active: !!activeStyle.i, onRun: () => toggle("italic", !!activeStyle.i) },
-        { id: "underline", label: "U", title: "Underline (Ctrl+U)", active: !!activeStyle.u, onRun: () => toggle("underline", !!activeStyle.u) },
-        { id: "strike", label: "S", title: "Strikethrough", active: !!activeStyle.s, onRun: () => toggle("strike", !!activeStyle.s) },
-        {
-          id: "color",
-          label: "Text colour",
-          render: () => <ColorPicker label="A" title="Text colour" value={activeStyle.color ?? "#1f1f1f"} onPick={(c) => format("color", c)} />,
-        },
+        { id: "bold", label: "Bold", shortcut: `${MOD_KEY}B`, title: "Make your text bold.", icon: "bold", group: "Font", active: !!activeStyle.b, onRun: () => toggle("bold", !!activeStyle.b) },
+        { id: "italic", label: "Italic", shortcut: `${MOD_KEY}I`, title: "Italicize your text.", icon: "italic", group: "Font", active: !!activeStyle.i, onRun: () => toggle("italic", !!activeStyle.i) },
+        { id: "underline", label: "Underline", shortcut: `${MOD_KEY}U`, title: "Underline your text.", icon: "underline", group: "Font", active: !!activeStyle.u, onRun: () => toggle("underline", !!activeStyle.u) },
+        { id: "strike", label: "Strikethrough", title: "Cross out text by drawing a line through it.", icon: "strike", group: "Font", active: !!activeStyle.s, onRun: () => toggle("strike", !!activeStyle.s) },
         {
           id: "fill",
-          label: "Fill colour",
-          render: () => <ColorPicker label="▧" title="Fill colour" value={activeStyle.fill ?? "#ffffff"} onPick={(c) => format("fill", c)} />,
+          label: "Fill Color",
+          title: "Color the background of cells to make them stand out.",
+          group: "Font",
+          newRow: true,
+          render: () => <ColorPicker label="▧" icon="fillColor" title="Fill colour" value={activeStyle.fill ?? "#ffffff"} onPick={(c) => format("fill", c)} />,
         },
-        { id: "align-left", label: "⇤", title: "Align left", active: activeStyle.align === "left", onRun: () => format("align", "left"), separatorBefore: true },
-        { id: "align-center", label: "↔", title: "Centre", active: activeStyle.align === "center", onRun: () => format("align", "center") },
-        { id: "align-right", label: "⇥", title: "Align right", active: activeStyle.align === "right", onRun: () => format("align", "right") },
+        {
+          id: "color",
+          label: "Font Color",
+          title: "Change the color of your text.",
+          group: "Font",
+          render: () => <ColorPicker label="A" icon="fontColor" title="Text colour" value={activeStyle.color ?? "#1f1f1f"} onPick={(c) => format("color", c)} />,
+        },
+        { id: "align-left", label: "Align Left", title: "Align your content to the left.", icon: "alignLeft", group: "Alignment", active: activeStyle.align === "left", onRun: () => format("align", "left") },
+        { id: "align-center", label: "Center", title: "Center your content.", icon: "alignCenter", group: "Alignment", active: activeStyle.align === "center", onRun: () => format("align", "center") },
+        { id: "align-right", label: "Align Right", title: "Align your content to the right.", icon: "alignRight", group: "Alignment", active: activeStyle.align === "right", onRun: () => format("align", "right") },
         {
           id: "format",
-          label: "Number format",
-          separatorBefore: true,
+          label: "Number Format",
+          title: "Choose how values in your cells are displayed: as a percentage, currency, date or time, etc.",
+          group: "Number",
           render: () => (
-            <select className="ribbon-select" aria-label="Number format" value={formatKind} onChange={(e) => format("format", e.target.value)}>
+            <select className="ribbon-select number-format" aria-label="Number format" value={formatKind} onChange={(e) => format("format", e.target.value)}>
               <option value="general">General</option>
               <option value="number">Number (1,234.50)</option>
               <option value="currency">Rupee (₹1,234.50)</option>
@@ -657,33 +827,141 @@ export function SheetsApp() {
             </select>
           ),
         },
-        { id: "dec-less", label: ".0←", title: "Fewer decimal places", onRun: () => format("decimals", "-1") },
-        { id: "dec-more", label: ".00→", title: "More decimal places", onRun: () => format("decimals", "1") },
-        { id: "clear-format", label: "Clear format", onRun: () => format("clear", ""), separatorBefore: true },
+        { id: "fmt-currency", label: "Currency Format", title: "Format as Indian rupees (₹1,234.50).", icon: "currency", group: "Number", newRow: true, active: formatKind === "currency", onRun: () => format("format", "currency") },
+        { id: "fmt-percent", label: "Percent Style", title: "Format as a percent.", icon: "percent", group: "Number", active: formatKind === "percent", onRun: () => format("format", "percent") },
+        { id: "fmt-comma", label: "Comma Style", title: "Format with a thousands separator (1,234.50).", icon: "comma", group: "Number", active: formatKind === "number", onRun: () => format("format", "number") },
+        { id: "dec-more", label: "Increase Decimal", title: "Show more decimal places for a more precise value.", icon: "decimalIncrease", group: "Number", separatorBefore: true, onRun: () => format("decimals", "1") },
+        { id: "dec-less", label: "Decrease Decimal", title: "Show fewer decimal places.", icon: "decimalDecrease", group: "Number", onRun: () => format("decimals", "-1") },
+        {
+          id: "cells-insert",
+          label: "Insert",
+          title: "Add cells, rows, columns or sheets to your workbook.",
+          icon: "insertCells",
+          size: "small",
+          group: "Cells",
+          menu: [
+            { id: "menu-row-above", label: "Insert Sheet Rows", icon: "insertRowAbove", onRun: () => insertLines("rows", false) },
+            { id: "menu-row-below", label: "Insert Sheet Rows Below", icon: "insertRowBelow", onRun: () => insertLines("rows", true) },
+            { id: "menu-col-left", label: "Insert Sheet Columns", icon: "insertColumnLeft", onRun: () => insertLines("cols", false), separatorBefore: true },
+            { id: "menu-col-right", label: "Insert Sheet Columns Right", icon: "insertColumnRight", onRun: () => insertLines("cols", true) },
+            { id: "menu-sheet", label: "Insert Sheet", shortcut: "⇧F11", icon: "insertSheet", onRun: addSheet, separatorBefore: true },
+          ],
+        },
+        {
+          id: "cells-delete",
+          label: "Delete",
+          title: "Delete rows or columns from your sheet.",
+          icon: "deleteCells",
+          size: "small",
+          group: "Cells",
+          menu: [
+            { id: "menu-del-rows", label: "Delete Sheet Rows", icon: "deleteRows", onRun: () => deleteLines("rows") },
+            { id: "menu-del-cols", label: "Delete Sheet Columns", icon: "deleteColumns", onRun: () => deleteLines("cols") },
+          ],
+        },
+        {
+          id: "cells-format",
+          label: "Format",
+          title: "Change column width, or rename the sheet.",
+          icon: "formatCells",
+          size: "small",
+          group: "Cells",
+          menu: [
+            { id: "menu-autofit", label: "AutoFit Column Width", onRun: () => autofit(col) },
+            { id: "menu-rename-sheet", label: "Rename Sheet", icon: "rename", onRun: () => setRenamingTab(sheet), separatorBefore: true },
+          ],
+        },
+        {
+          id: "clear",
+          label: "Clear",
+          title: "Delete everything in the cell, or remove just the formatting or contents.",
+          icon: "clear",
+          size: "small",
+          group: "Editing",
+          menu: [
+            { id: "clear-contents", label: "Clear Contents", shortcut: "Del", onRun: clear },
+            { id: "clear-format", label: "Clear Formats", onRun: () => format("clear", "") },
+          ],
+        },
+        {
+          id: "sort-filter",
+          label: "Sort & Filter",
+          title: "Organize your data so it's easier to analyze.",
+          icon: "sortFilter",
+          size: "large",
+          group: "Editing",
+          menu: [
+            { id: "sort-asc", label: "Sort A to Z", icon: "sortAsc", onRun: () => sort(true) },
+            { id: "sort-desc", label: "Sort Z to A", icon: "sortDesc", onRun: () => sort(false) },
+          ],
+        },
+        {
+          id: "find-select",
+          label: "Find & Select",
+          title: "Find and select specific text, formatting or type of information within the workbook.",
+          icon: "find",
+          size: "large",
+          group: "Editing",
+          menu: [
+            { id: "find", label: "Find…", shortcut: `${MOD_KEY}F`, icon: "find", onRun: () => setFindMode("find") },
+            { id: "replace", label: "Replace…", shortcut: `${MOD_KEY}H`, icon: "replace", onRun: () => setFindMode("replace") },
+            { id: "goto", label: "Go To…", shortcut: `${MOD_KEY}G`, icon: "goTo", onRun: () => nameBoxRef.current?.focus() },
+          ],
+        },
       ],
     },
     {
       id: "insert",
       label: "Insert",
       commands: [
-        { id: "row-above", label: "Row above", onRun: () => insertLines("rows", false) },
-        { id: "row-below", label: "Row below", onRun: () => insertLines("rows", true) },
-        { id: "col-left", label: "Column left", onRun: () => insertLines("cols", false) },
-        { id: "col-right", label: "Column right", onRun: () => insertLines("cols", true) },
-        { id: "del-rows", label: "Delete rows", onRun: () => deleteLines("rows"), separatorBefore: true },
-        { id: "del-cols", label: "Delete columns", onRun: () => deleteLines("cols") },
-        { id: "sheet", label: "New sheet", onRun: addSheet, separatorBefore: true },
+        { id: "row-above", label: "Row above", title: "Insert rows above the selection.", icon: "insertRowAbove", size: "small", group: "Cells", onRun: () => insertLines("rows", false) },
+        { id: "row-below", label: "Row below", title: "Insert rows below the selection.", icon: "insertRowBelow", size: "small", group: "Cells", onRun: () => insertLines("rows", true) },
+        { id: "col-left", label: "Column left", title: "Insert columns left of the selection.", icon: "insertColumnLeft", size: "small", group: "Cells", onRun: () => insertLines("cols", false) },
+        { id: "col-right", label: "Column right", title: "Insert columns right of the selection.", icon: "insertColumnRight", size: "small", group: "Cells", onRun: () => insertLines("cols", true) },
+        { id: "del-rows", label: "Delete rows", title: "Delete the selected rows.", icon: "deleteRows", size: "small", group: "Cells", onRun: () => deleteLines("rows") },
+        { id: "del-cols", label: "Delete columns", title: "Delete the selected columns.", icon: "deleteColumns", size: "small", group: "Cells", onRun: () => deleteLines("cols") },
+        { id: "sheet", label: "New sheet", shortcut: "⇧F11", title: "Add a sheet after the last one.", icon: "insertSheet", size: "large", group: "Sheets", onRun: addSheet },
+      ],
+    },
+    {
+      id: "formulas",
+      label: "Formulas",
+      commands: [
+        {
+          id: "insert-function",
+          label: "Insert Function",
+          shortcut: "⇧F3",
+          title: "Search for a function and insert it into the active cell.",
+          icon: "function",
+          size: "large",
+          group: "Function Library",
+          onRun: openInsertFunction,
+        },
       ],
     },
     {
       id: "data",
       label: "Data",
       commands: [
-        { id: "sort-asc", label: "Sort A → Z", title: "Sort by the active column", onRun: () => sort(true) },
-        { id: "sort-desc", label: "Sort Z → A", title: "Sort by the active column", onRun: () => sort(false) },
-        { id: "find", label: "Find", title: "Find (Ctrl+F)", onRun: () => setFindMode("find"), separatorBefore: true },
-        { id: "replace", label: "Replace", title: "Find and replace (Ctrl+H)", onRun: () => setFindMode("replace") },
-        { id: "goto", label: "Go to", title: "Go to a cell (Ctrl+G)", onRun: () => nameBoxRef.current?.focus() },
+        { id: "sort-asc", label: "Sort A to Z", title: "Sort by the active column, lowest to highest.", icon: "sortAsc", size: "small", group: "Sort & Filter", onRun: () => sort(true) },
+        { id: "sort-desc", label: "Sort Z to A", title: "Sort by the active column, highest to lowest.", icon: "sortDesc", size: "small", group: "Sort & Filter", onRun: () => sort(false) },
+      ],
+    },
+    {
+      id: "view",
+      label: "View",
+      commands: [
+        {
+          id: "zoom",
+          label: "Zoom",
+          title: "Zoom in or out of the sheet.",
+          icon: "zoom",
+          size: "large",
+          group: "Zoom",
+          menu: ZOOM_LEVELS.map((z) => ({ id: `zoom-${z * 100}`, label: `${Math.round(z * 100)}%`, active: z === zoom, onRun: () => setZoom(z) })),
+        },
+        { id: "zoom-100", label: "100%", title: "Zoom to 100% of the normal size.", icon: "zoom100", size: "large", group: "Zoom", onRun: () => setZoom(1) },
+        { id: "zoom-selection", label: "Zoom to Selection", title: "Zoom so the selected cells fill the window.", icon: "zoomSelection", size: "large", group: "Zoom", onRun: zoomToSelection },
       ],
     },
   ];
@@ -696,6 +974,18 @@ export function SheetsApp() {
 
   return (
     <div className="sheets-app">
+      <WorkbookTitle
+        name={fileName}
+        onRename={(name) => {
+          setFileName(name);
+          changed();
+        }}
+        onDone={() => cellInputRef.current?.focus({ preventScroll: true })}
+        status={saveStatus}
+        onSave={() => download(new Uint8Array(doc.toXlsx()), `${fileName}.xlsx`, XLSX_MIME)}
+        onUndo={undo}
+        onRedo={redo}
+      />
       <Ribbon tabs={tabs} initialTab="home" />
       <FormulaBar
         inputRef={barInputRef}
@@ -715,6 +1005,7 @@ export function SheetsApp() {
         onEditorKey={onEditorKey}
         onCommit={commit}
         onCancel={() => setEditing(null)}
+        onInsertFunction={openInsertFunction}
       />
       <div className="grid-area">
         <Grid
@@ -785,16 +1076,7 @@ export function SheetsApp() {
           renaming={renamingTab}
           setRenaming={setRenamingTab}
         />
-        <StatusBar doc={doc} sheet={sheet} rect={dataRect()} />
-        <select className="zoom" aria-label="Zoom" title="Zoom (Ctrl + mouse wheel)" value={zoom} onChange={(e) => setZoom(Number(e.target.value))}>
-          {[...new Set([...ZOOM_LEVELS, zoom])]
-            .sort((a, b) => a - b)
-            .map((z) => (
-              <option key={z} value={z}>
-                {Math.round(z * 100)}%
-              </option>
-            ))}
-        </select>
+        <StatusBar doc={doc} sheet={sheet} rect={dataRect()} mode={statusMode(editing, pointMode)} zoom={zoom} onZoom={setZoom} />
       </footer>
       <FormulaAssist
         anchor={activeInput?.getBoundingClientRect() ?? null}
@@ -805,12 +1087,26 @@ export function SheetsApp() {
         onHover={setAssistIndex}
       />
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+      {insertFunctionOpen && <InsertFunctionDialog onInsert={closeInsertFunction} onClose={() => closeInsertFunction(null)} />}
     </div>
   );
 }
 
 /** A toolbar colour swatch. Applies the colour once the picker closes. */
-function ColorPicker({ label, title, value, onPick }: { label: string; title: string; value: string; onPick: (c: string) => void }) {
+function ColorPicker({
+  label,
+  icon,
+  title,
+  value,
+  onPick,
+}: {
+  label: string;
+  /** Icon name from @office/ui, drawn above the colour bar instead of `label`. */
+  icon?: string;
+  title: string;
+  value: string;
+  onPick: (c: string) => void;
+}) {
   const ref = useRef<HTMLInputElement>(null);
   const latest = useRef(onPick);
   latest.current = onPick;
@@ -826,22 +1122,16 @@ function ColorPicker({ label, title, value, onPick }: { label: string; title: st
     ref.current!.value = value;
   }, [value]);
   return (
-    <label className="color-picker" title={title}>
-      <span style={{ borderBottomColor: value }}>{label}</span>
+    <label className={icon ? "color-picker with-icon" : "color-picker"} title={icon ? undefined : title}>
+      {icon ? (
+        <span className="color-swatch">
+          <Icon name={icon} />
+          <span className="color-bar" style={{ background: value }} />
+        </span>
+      ) : (
+        <span style={{ borderBottomColor: value }}>{label}</span>
+      )}
       <input ref={ref} type="color" defaultValue={value} aria-label={title} />
     </label>
-  );
-}
-
-function StatusBar({ doc, sheet, rect }: { doc: SheetsDocument; sheet: number; rect: Rect | null }) {
-  if (!rect || (rect.top === rect.bottom && rect.left === rect.right)) return <div className="status-bar" />;
-  const [count, numbers, sum] = doc.rangeStats(sheet, rect.top, rect.left, rect.bottom - rect.top + 1, rect.right - rect.left + 1);
-  const fmt = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 10 });
-  return (
-    <div className="status-bar">
-      {numbers > 0 && <span>Average: {fmt(sum / numbers)}</span>}
-      <span>Count: {count}</span>
-      {numbers > 0 && <span>Sum: {fmt(sum)}</span>}
-    </div>
   );
 }
