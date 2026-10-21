@@ -4,7 +4,7 @@
 // counter that tells the grid to repaint.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { SheetsDocument, functionList, parseStyle, type FunctionInfo } from "@office/engine";
+import { SheetsDocument, ValueKind, functionList, parseStyle, type FunctionInfo } from "@office/engine";
 import { Ribbon, type RibbonTab } from "@office/ui";
 import { download, pickFile } from "../files";
 import { clearDraft, loadDraft, saveDraft } from "./autosave";
@@ -34,7 +34,7 @@ import { SheetTabs } from "./SheetTabs";
 import type { EditState } from "./types";
 import { MOD_KEY, insertFunctionText, statusMode, zoomToFit } from "./chrome";
 import { InsertFunctionDialog } from "./InsertFunctionDialog";
-import { ColumnLayout } from "./layout";
+import { ColumnLayout, DEFAULT_COL_WIDTH } from "./layout";
 import { StatusBar } from "./StatusBar";
 import { WorkbookTitle, type SaveStatus } from "./WorkbookTitle";
 import { Icon } from "@office/ui";
@@ -154,10 +154,25 @@ export function SheetsApp() {
     const value = closeParens(editing.draft);
     if (value !== doc.input(sheet, row, col)) {
       doc.setInputs(sheet, Uint32Array.of(row), Uint32Array.of(col), [value]);
+      widenForNumber(row, col);
       changed();
     }
     setEditing(null);
     if (dRow || dCol) setSelection(moveSelection(selection, dRow, dCol, false));
+  }
+
+  /**
+   * Like Excel: when a number or date typed into a default-width column
+   * doesn't fit, the column widens instead of showing ####.
+   */
+  function widenForNumber(r: number, c: number) {
+    if (doc.kindBlock(sheet, r, c, 1, 1)[0] !== ValueKind.Number) return;
+    const widths = doc.columnWidths(sheet);
+    for (let i = 0; i < widths.length; i += 2) if (widths[i] === c) return; // user-set width: keep it
+    const ctx = document.createElement("canvas").getContext("2d")!;
+    ctx.font = fontFor(parseStyle(doc.styleBlock(sheet, r, c, 1, 1)[0]));
+    const needed = Math.ceil(ctx.measureText(doc.displayBlock(sheet, r, c, 1, 1)[0]).width + 10);
+    if (needed > DEFAULT_COL_WIDTH) doc.setColumnWidth(sheet, c, c, needed);
   }
 
   /** Ctrl+Enter: put the entry in every selected cell; formulas shift like a fill. */
