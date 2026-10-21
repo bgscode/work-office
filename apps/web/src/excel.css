@@ -33,11 +33,39 @@ body {
 .title-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   height: 40px;
-  padding: 0 8px;
-  background: var(--xl-green);
+  padding: 0 8px 0 0;
+  background: var(--app-color, var(--xl-green));
   color: #fff;
+}
+
+.home-button {
+  display: inline-grid;
+  place-items: center;
+  width: 48px;
+  height: 40px;
+  border: 0;
+  background: none;
+  color: #fff;
+}
+
+.home-button:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.title-app {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.title-app svg rect:first-child {
+  stroke: rgba(255, 255, 255, 0.7);
+  stroke-width: 1.5;
 }
 
 .title-bar .app-mark-tile {

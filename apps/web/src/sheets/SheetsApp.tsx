@@ -7,7 +7,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { SheetsDocument, ValueKind, functionList, parseStyle, type FunctionInfo } from "@office/engine";
 import { Ribbon, type RibbonTab } from "@office/ui";
 import { download, pickFile } from "../files";
-import { clearDraft, loadDraft, saveDraft } from "./autosave";
+import { loadDocument, saveDocument } from "../documents";
 import { parseTsv, toTsv } from "./clipboard";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { FindBar, type FindOptions } from "./FindBar";
@@ -62,20 +62,31 @@ function savedZoom(): number {
 /** Formatting more cells than this at once is limited to the area holding data. */
 const MAX_FORMAT_CELLS = 200_000;
 
-function openInitialDocument(): { doc: SheetsDocument; name: string } {
-  const draft = loadDraft();
-  if (draft) {
+/** The workbook saved under `docId` in this browser, or a new empty one. */
+function openSavedDocument(docId: string): { doc: SheetsDocument; name: string } {
+  const saved = loadDocument(docId);
+  if (saved) {
     try {
-      return { doc: SheetsDocument.fromXlsx(draft.xlsx), name: draft.name };
+      return { doc: SheetsDocument.fromXlsx(saved.bytes), name: saved.name };
     } catch {
-      clearDraft();
+      // Unreadable: start empty rather than failing to open.
     }
   }
-  return { doc: new SheetsDocument(), name: "Untitled" };
+  return { doc: new SheetsDocument(), name: "Untitled workbook" };
 }
 
-export function SheetsApp() {
-  const [initial] = useState(openInitialDocument);
+interface SheetsAppProps {
+  /** Id this workbook is autosaved under (see documents.ts). */
+  docId: string;
+  /** A file to open into this new document, chosen on Home or via File > Open. */
+  initialFile?: File;
+  onInitialFileOpened: () => void;
+  onNewWorkbook: () => void;
+  onOpenFile: (file: File) => void;
+}
+
+export function SheetsApp({ docId, initialFile, onInitialFileOpened, onNewWorkbook, onOpenFile }: SheetsAppProps) {
+  const [initial] = useState(() => openSavedDocument(docId));
   const [doc, setDoc] = useState(initial.doc);
   const [fileName, setFileName] = useState(initial.name);
   const [sheet, setSheet] = useState(0);
@@ -125,14 +136,33 @@ export function SheetsApp() {
 
   // ---- autosave: a second after the last change
 
+  const save = () => saveDocument(docId, "sheets", fileName, new Uint8Array(doc.toXlsx()));
   useEffect(() => {
     if (revision === 0) return;
     const timer = setTimeout(() => {
-      setSaveFailed(!saveDraft(fileName, doc.toXlsx()));
+      setSaveFailed(!save());
       setSavedRevision(revision);
     }, 1000);
     return () => clearTimeout(timer);
   }, [doc, revision, fileName]);
+
+  // Leaving the workbook (Home, Back, another file) saves pending changes right away.
+  const flush = useRef(() => {});
+  flush.current = () => {
+    if (revision > 0 && revision !== savedRevision) save();
+  };
+  useEffect(() => () => flush.current(), []);
+
+  useEffect(() => {
+    document.title = `${fileName} - Sheets`;
+  }, [fileName]);
+
+  // A file picked on Home opens into this new document.
+  useEffect(() => {
+    if (!initialFile) return;
+    onInitialFileOpened();
+    void loadFile(initialFile);
+  }, []);
   const saveStatus: SaveStatus = revision !== savedRevision && revision > 0 ? "saving" : saveFailed ? "failed" : "saved";
 
   // ---- editing
@@ -598,7 +628,10 @@ export function SheetsApp() {
 
   async function open() {
     const file = await pickFile(".xlsx,.csv");
-    if (!file) return;
+    if (file) onOpenFile(file);
+  }
+
+  async function loadFile(file: File) {
     const base = file.name.replace(/\.[^.]+$/, "");
     try {
       if (file.name.toLowerCase().endsWith(".csv")) {
@@ -612,9 +645,9 @@ export function SheetsApp() {
   }
 
   function newDocument() {
-    if (!confirm("Start a new, empty workbook? Download the current one first if you want to keep it.")) return;
-    clearDraft();
-    replaceDocument(new SheetsDocument(), "Untitled");
+    // The current workbook is autosaved and stays in Recent on Home.
+    flush.current();
+    onNewWorkbook();
   }
 
   // ---- menus

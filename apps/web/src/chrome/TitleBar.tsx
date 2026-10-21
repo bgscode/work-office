@@ -1,39 +1,30 @@
-// Excel-style title bar: app mark, app switcher, a slot for the open
-// document's name and save status (filled by the app through TitleSlot).
+// The app's title bar, like Excel's: a button back to Home, the app icon, and
+// a slot where the open app shows its quick-access buttons, file name and save
+// status (filled by the app through TitleSlot).
 
-export type AppKind = "sheets" | "docs" | "slides";
-
-const APPS: { kind: AppKind; label: string; letter: string; color: string }[] = [
-  { kind: "sheets", label: "Sheets", letter: "X", color: "#107c41" },
-  { kind: "docs", label: "Docs", letter: "W", color: "#185abd" },
-  { kind: "slides", label: "Slides", letter: "P", color: "#c43e1c" },
-];
+import type { AppKind } from "../documents";
+import { APPS, AppIcon } from "./AppIcon";
 
 interface Props {
   app: AppKind;
-  onApp: (app: AppKind) => void;
+  onHome: () => void;
   /** Receives the element the app portals its title into. */
   slotRef: (el: HTMLElement | null) => void;
 }
 
-export function TitleBar({ app, onApp, slotRef }: Props) {
-  const current = APPS.find((a) => a.kind === app)!;
+export function TitleBar({ app, onHome, slotRef }: Props) {
   return (
-    <header className="app-bar title-bar" data-app={app}>
-      <span className="app-mark" aria-hidden title={`Office ${current.label}`}>
-        <span className="app-mark-tile" style={{ background: current.color }}>
-          {current.letter}
-        </span>
+    <header className="title-bar" data-app={app} style={{ ["--app-color" as string]: APPS[app].color }}>
+      <button className="home-button" onClick={onHome} aria-label="Go to Home" title="Home">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+          {[2, 7, 12].flatMap((x) => [2, 7, 12].map((y) => <rect key={`${x}${y}`} x={x - 1} y={y - 1} width="3" height="3" rx="0.5" fill="#fff" />))}
+        </svg>
+      </button>
+      <span className="title-app">
+        <AppIcon app={app} size={20} />
+        <span>{APPS[app].label}</span>
       </span>
-      <nav className="app-switcher" aria-label="Apps">
-        {APPS.map((a) => (
-          <button key={a.kind} className={a.kind === app ? "active" : ""} aria-current={a.kind === app ? "page" : undefined} onClick={() => onApp(a.kind)}>
-            {a.label}
-          </button>
-        ))}
-      </nav>
       <div className="title-slot" ref={slotRef} />
-      <span className="brand">Office</span>
     </header>
   );
 }

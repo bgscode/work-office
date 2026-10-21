@@ -22,6 +22,10 @@ services/server               auth, storage, collaboration (planned)
 The desktop app (`apps/desktop`, planned) will wrap `apps/web` with Tauri and
 call the same Rust crates natively instead of through WebAssembly.
 
+## App shell
+
+`apps/web/src/App.tsx` picks the page from the URL hash (`router.ts`): `#/` is the Home page (`home/HomePage.tsx`), `#/sheets/<document id>` opens a workbook. `documents.ts` stores every document's bytes (`.xlsx` for Sheets) and a Recent index in `localStorage`; Home lists them and the app autosaves into them. The title bar (`chrome/TitleBar.tsx`) belongs to the shell; each app fills its middle through a portal (`chrome/titleSlot.ts`).
+
 ## What happens when you type `=SUM(A1:A3)` and press Enter
 
 1. `Grid.tsx` (the focused cell input) reports the draft; `SheetsApp.tsx` commits it with
