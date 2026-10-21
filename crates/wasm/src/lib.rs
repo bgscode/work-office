@@ -22,6 +22,8 @@ use sheets_engine::ops::{
 use sheets_engine::{Align, CellRef, FindOptions, NumberFormat, Range, Sheet, Style, StylePatch, Value, Workbook};
 use wasm_bindgen::prelude::*;
 
+mod charts;
+
 fn local_now_ms() -> f64 {
     let d = js_sys::Date::new_0();
     d.get_time() - d.get_timezone_offset() * 60_000.0

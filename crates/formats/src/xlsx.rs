@@ -15,7 +15,8 @@
 //! Supported today: values (numbers, text, booleans, errors), formulas, cell
 //! formatting (bold/italic/underline/strike, text and fill colours, horizontal
 //! alignment, number formats) and column widths.
-//! Not yet: merged cells, borders, fonts/sizes, row heights, charts.
+//! Charts and pictures: see `xlsx/drawings.rs`.
+//! Not yet: merged cells, borders, fonts/sizes, row heights.
 //! Excel "shared formulas" are imported as their cached values for every cell
 //! except the first, because we don't yet rewrite references when copying formulas.
 
@@ -29,6 +30,8 @@ use quick_xml::{Reader, XmlVersion};
 use sheets_engine::{Align, CellRef, ErrorKind, NumberFormat, Sheet, Style, Value, Workbook};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
+
+mod drawings;
 
 const NS_MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const NS_REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -108,6 +111,7 @@ pub fn read(bytes: &[u8]) -> Result<Workbook> {
             sheet.set_col_width(col, Some(width));
         }
         sheet.set_inputs(data.cells);
+        drawings::read_sheet_drawings(&mut zip, &resolve(&rel.target), &name, &mut sheet)?;
         book.push_sheet(name, sheet);
     }
     if book.sheets.is_empty() {
@@ -425,6 +429,7 @@ pub fn write(book: &Workbook) -> Result<Vec<u8>> {
     let mut parts: Vec<(String, String)> = Vec::new();
     let n = book.sheets.len();
     let mut styles = StyleTable::default();
+    let mut drawing_parts = drawings::DrawingWriter::default();
 
     let mut types = String::from(concat!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
@@ -460,7 +465,8 @@ pub fn write(book: &Workbook) -> Result<Vec<u8>> {
         rels.push_str(&format!(
             r#"<Relationship Id="rId{id}" Type="{NS_REL}/worksheet" Target="worksheets/sheet{id}.xml"/>"#
         ));
-        parts.push((format!("xl/worksheets/sheet{id}.xml"), worksheet_xml(&ws.sheet, &mut styles)));
+        let sheet_xml = drawing_parts.add_sheet(id, book, i, worksheet_xml(&ws.sheet, &mut styles));
+        parts.push((format!("xl/worksheets/sheet{id}.xml"), sheet_xml));
     }
     // Ask Excel to recalculate on open, since our cached values may differ slightly.
     workbook.push_str(r#"</sheets><calcPr calcId="0" fullCalcOnLoad="1"/></workbook>"#);
@@ -471,12 +477,18 @@ pub fn write(book: &Workbook) -> Result<Vec<u8>> {
     parts.push(("xl/workbook.xml".into(), workbook));
     parts.push(("xl/_rels/workbook.xml.rels".into(), rels));
     parts.push(("xl/styles.xml".into(), styles.finish_xml()));
+    let media = drawing_parts.finish(&mut parts);
 
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     for (name, xml) in parts {
         zip.start_file(name, options).map_err(|e| OfficeError::Io(e.to_string()))?;
         zip.write_all(xml.as_bytes()).map_err(|e| OfficeError::Io(e.to_string()))?;
+    }
+    for (name, bytes) in media {
+        zip.start_file(name, SimpleFileOptions::default().compression_method(CompressionMethod::Stored))
+            .map_err(|e| OfficeError::Io(e.to_string()))?;
+        zip.write_all(&bytes).map_err(|e| OfficeError::Io(e.to_string()))?;
     }
     Ok(zip.finish().map_err(|e| OfficeError::Io(e.to_string()))?.into_inner())
 }

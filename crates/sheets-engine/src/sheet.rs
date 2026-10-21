@@ -14,6 +14,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::cell::{CellRef, Range, MAX_COLS, MAX_ROWS};
+use crate::chart::Drawings;
 use crate::fill::{self, FillDirection};
 use crate::format;
 use crate::formula::refs::{self, Axis};
@@ -92,6 +93,8 @@ pub struct Sheet {
     styles: HashMap<CellRef, Style>,
     /// Column index -> width in pixels, for columns that aren't the default width.
     col_widths: BTreeMap<u32, f64>,
+    /// Charts and pictures floating over the cells (see `chart.rs`).
+    drawings: Drawings,
 }
 
 static EMPTY: Value = Value::Empty;
@@ -189,6 +192,15 @@ impl Sheet {
     /// Columns with a custom width, ascending.
     pub fn col_widths(&self) -> impl Iterator<Item = (u32, f64)> + '_ {
         self.col_widths.iter().map(|(c, w)| (*c, *w))
+    }
+
+    /// Charts and pictures on this sheet, back to front.
+    pub fn drawings(&self) -> &Drawings {
+        &self.drawings
+    }
+
+    pub fn set_drawings(&mut self, drawings: Drawings) {
+        self.drawings = drawings;
     }
 
     /// All non-empty cells, sorted row by row.
@@ -360,6 +372,7 @@ impl Sheet {
                 out.col_widths.insert(c, *width);
             }
         }
+        out.drawings = self.drawings.remapped(axis, map);
         let edits: Vec<_> = self
             .cells
             .iter()
@@ -391,6 +404,7 @@ impl Sheet {
         let in_range =
             |at: &CellRef| at.col >= range.start.col && at.col <= range.end.col && new_row_of.contains_key(&at.row);
         let mut out = Sheet { col_widths: self.col_widths.clone(), ..Sheet::new() };
+        out.drawings = self.drawings.clone();
         for (at, style) in &self.styles {
             let to = if in_range(at) { CellRef::new(new_row_of[&at.row], at.col) } else { *at };
             out.styles.insert(to, style.clone());

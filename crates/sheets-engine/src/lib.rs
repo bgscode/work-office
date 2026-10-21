@@ -13,6 +13,7 @@
 //! See `crates/sheets-engine/README.md` for a guided tour.
 
 pub mod cell;
+pub mod chart;
 pub mod date;
 pub mod fill;
 pub mod format;
