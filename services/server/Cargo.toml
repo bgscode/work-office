@@ -1,0 +1,10 @@
+[package]
+name = "office-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+office-core = { workspace = true }
+office-collab = { workspace = true }
+office-formats = { workspace = true }

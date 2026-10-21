@@ -1,0 +1,11 @@
+[package]
+name = "office-formats"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+office-core = { workspace = true }
+sheets-engine = { workspace = true }
+quick-xml = { workspace = true }
+zip = { workspace = true }

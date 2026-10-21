@@ -1,0 +1,14 @@
+{
+  "name": "office",
+  "private": true,
+  "license": "MIT OR Apache-2.0",
+  "packageManager": "pnpm@10.27.0",
+  "scripts": {
+    "build:wasm": "wasm-pack build crates/wasm --target web --out-dir ../../packages/engine/pkg --out-name office_wasm",
+    "dev": "pnpm build:wasm --dev && pnpm --filter @office/web dev",
+    "build": "pnpm build:wasm && pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "cargo test --workspace && pnpm -r test",
+    "lint": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings"
+  }
+}

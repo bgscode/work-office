@@ -1,0 +1,500 @@
+:root {
+  --brand: #185abd;
+  --border: #dadce0;
+  --muted: #5f6368;
+  --surface: #ffffff;
+  --surface-alt: #f8f9fa;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+  background: var(--surface);
+  color: #1f1f1f;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--brand);
+  color: #fff;
+}
+
+.app-bar .brand {
+  font-weight: 600;
+  margin-right: 12px;
+}
+
+.app-bar button {
+  color: #fff;
+  background: none;
+  border: 0;
+  padding: 4px 12px;
+  border-radius: 4px;
+  text-transform: capitalize;
+}
+
+.app-bar button.active {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.placeholder {
+  padding: 24px;
+  color: var(--muted);
+}
+
+/* Ribbon (packages/ui) */
+.ribbon {
+  background: var(--surface-alt);
+  border-bottom: 1px solid var(--border);
+}
+
+.ribbon-tabs button,
+.ribbon-commands button {
+  border: 0;
+  background: none;
+  padding: 6px 10px;
+}
+
+.ribbon-tabs button.active {
+  border-bottom: 2px solid var(--brand);
+  color: var(--brand);
+}
+
+.ribbon-commands {
+  display: flex;
+  gap: 2px;
+  padding: 2px 6px 6px;
+  flex-wrap: wrap;
+}
+
+.ribbon-commands button:hover {
+  background: #e8eaed;
+  border-radius: 4px;
+}
+
+/* Sheets */
+.sheets-app {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.formula-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.formula-bar .name-box {
+  width: 110px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.formula-bar .fx {
+  color: var(--muted);
+  font-style: italic;
+}
+
+
+.grid {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.grid-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.grid-scroller {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  outline: none;
+}
+
+.cell-editor {
+  position: absolute;
+  z-index: 2;
+  padding: 0 4px;
+  border: 2px solid var(--brand);
+  font: 13px system-ui, -apple-system, "Segoe UI", sans-serif;
+  outline: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.sheets-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--border);
+  background: var(--surface-alt);
+  min-height: 30px;
+}
+
+.sheet-tabs {
+  display: flex;
+  overflow-x: auto;
+}
+
+.sheet-tabs button {
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: none;
+  padding: 6px 14px;
+  white-space: nowrap;
+}
+
+.sheet-tabs button.active {
+  background: var(--surface);
+  color: var(--brand);
+  font-weight: 600;
+  box-shadow: inset 0 2px 0 var(--brand);
+}
+
+.sheet-tabs .add-sheet {
+  font-size: 16px;
+  padding: 2px 12px;
+}
+
+.status-bar {
+  display: flex;
+  gap: 16px;
+  padding: 0 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* The cell input stays focused on the active cell but is invisible until an edit starts. */
+.cell-editor.idle {
+  opacity: 0;
+  pointer-events: none;
+  box-shadow: none;
+}
+
+/* Ribbon controls */
+.ribbon-item {
+  display: inline-flex;
+  align-items: center;
+}
+
+.ribbon-separator {
+  width: 1px;
+  height: 20px;
+  margin: 0 6px;
+  background: var(--border);
+}
+
+.ribbon-commands button.pressed {
+  background: #d3e3fd;
+  border-radius: 4px;
+}
+
+.ribbon-commands button[title^="Bold"] {
+  font-weight: 700;
+}
+
+.ribbon-commands button[title^="Italic"] {
+  font-style: italic;
+}
+
+.ribbon-commands button[title^="Underline"] {
+  text-decoration: underline;
+}
+
+.ribbon-commands button[title^="Strikethrough"] {
+  text-decoration: line-through;
+}
+
+.ribbon-select {
+  font: inherit;
+  padding: 3px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.color-picker {
+  position: relative;
+  display: inline-flex;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.color-picker:hover {
+  background: #e8eaed;
+}
+
+.color-picker span {
+  font-weight: 600;
+  border-bottom: 3px solid;
+  line-height: 1.1;
+}
+
+.color-picker input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* Grid area with overlays */
+.grid-area {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.find-bar {
+  position: absolute;
+  top: 8px;
+  right: 24px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.find-bar input {
+  width: 200px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+}
+
+.find-bar button {
+  border: 0;
+  background: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.find-bar button:hover {
+  background: #e8eaed;
+}
+
+
+/* Formula autocomplete */
+.formula-suggestions,
+.formula-hint {
+  position: fixed;
+  z-index: 10;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  max-width: 460px;
+}
+
+.formula-suggestions li {
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.formula-suggestions li.selected {
+  background: #e8f0fe;
+}
+
+.formula-suggestions li span,
+.formula-hint span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.formula-suggestions code,
+.formula-hint code {
+  font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.formula-hint {
+  padding: 6px 12px;
+}
+
+/* Context menu */
+.context-menu {
+  position: fixed;
+  z-index: 20;
+  min-width: 220px;
+  padding: 4px 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+}
+
+.context-menu button {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 14px;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+
+.context-menu button:hover:not(:disabled) {
+  background: #e8f0fe;
+}
+
+.context-menu button:disabled {
+  color: #aaa;
+  cursor: default;
+}
+
+.context-menu kbd {
+  font: inherit;
+  color: var(--muted);
+  margin-left: 24px;
+}
+
+.context-menu hr {
+  margin: 4px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.tab-rename {
+  width: 110px;
+  margin: 2px;
+  padding: 3px 6px;
+  font: inherit;
+  border: 2px solid var(--brand);
+  border-radius: 3px;
+}
+
+/* M1: name box, multi-line editors, find & replace, zoom */
+input.name-box {
+  font: inherit;
+}
+
+.name-box.invalid {
+  border-color: #c5221f;
+  outline: 1px solid #c5221f;
+}
+
+.formula-input {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+}
+
+.formula-bar textarea {
+  position: absolute;
+  z-index: 6;
+  top: 0;
+  left: 0;
+  width: 100%;
+  min-height: 24px;
+  background: var(--surface);
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font: 13px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  resize: none;
+  white-space: pre;
+  overflow: auto;
+}
+
+textarea.cell-editor {
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  padding: 1px 4px;
+}
+
+.find-bar {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.find-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.find-row .toggle {
+  width: 22px;
+  padding: 4px 0;
+  text-align: center;
+}
+
+.find-row.options {
+  gap: 12px;
+  padding-left: 26px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.find-row.options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.find-message {
+  margin-left: auto;
+  color: var(--brand);
+}
+
+.find-bar button:disabled {
+  color: #aaa;
+}
+
+.sheets-footer .zoom {
+  margin-right: 8px;
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+}

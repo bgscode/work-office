@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/docs-engine",
+    "crates/sheets-engine",
+    "crates/slides-engine",
+    "crates/formats",
+    "crates/collab",
+    "crates/wasm",
+    "services/server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+office-core = { path = "crates/core" }
+docs-engine = { path = "crates/docs-engine" }
+sheets-engine = { path = "crates/sheets-engine" }
+slides-engine = { path = "crates/slides-engine" }
+office-formats = { path = "crates/formats" }
+office-collab = { path = "crates/collab" }
+quick-xml = "0.42"
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
