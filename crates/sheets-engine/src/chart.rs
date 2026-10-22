@@ -564,39 +564,9 @@ impl Op<Workbook> for SetDrawings {
 
 // ---------------------------------------------------------------- building series
 
-/// Excel's "current region": the block of filled cells around `at`, bounded
-/// by empty rows and columns. Used when a chart is inserted with one cell selected.
-pub fn current_region(sheet: &Sheet, at: CellRef) -> Range {
-    let filled =
-        |r: u32, c: u32| !sheet.value(CellRef::new(r, c)).is_empty() || !sheet.input(CellRef::new(r, c)).is_empty();
-    let (rows, cols) = sheet.extent();
-    let (mut top, mut left, mut bottom, mut right) = (at.row, at.col, at.row, at.col);
-    loop {
-        let mut grew = false;
-        // Expand while any cell just outside the rectangle (including diagonals) is filled.
-        if top > 0 && (left.saturating_sub(1)..=(right + 1).min(MAX_COLS - 1)).any(|c| filled(top - 1, c)) {
-            top -= 1;
-            grew = true;
-        }
-        if bottom + 1 < rows && (left.saturating_sub(1)..=(right + 1).min(MAX_COLS - 1)).any(|c| filled(bottom + 1, c))
-        {
-            bottom += 1;
-            grew = true;
-        }
-        if left > 0 && (top.saturating_sub(1)..=(bottom + 1).min(MAX_ROWS - 1)).any(|r| filled(r, left - 1)) {
-            left -= 1;
-            grew = true;
-        }
-        if right + 1 < cols && (top.saturating_sub(1)..=(bottom + 1).min(MAX_ROWS - 1)).any(|r| filled(r, right + 1)) {
-            right += 1;
-            grew = true;
-        }
-        if !grew {
-            break;
-        }
-    }
-    Range::new(CellRef::new(top, left), CellRef::new(bottom, right))
-}
+/// Excel's "current region" (shared with the Data tools). Used when a chart
+/// is inserted with one cell selected.
+pub use crate::data_tools::current_region;
 
 fn is_number(sheet: &Sheet, at: CellRef) -> bool {
     matches!(sheet.value(at), Value::Number(_))
@@ -926,7 +896,8 @@ pub fn compute_view(chart: &Chart, sheets: &dyn SheetLookup, value_axis_px: f64,
                         if first_format.is_none() {
                             first_format = Some(sh.style(at).number_format.clone());
                         }
-                        (Some(*n), sh.display(at))
+                        // Labels are only shown with data labels; formatting is skipped otherwise.
+                        (Some(*n), if chart.data_labels { sh.display(at) } else { String::new() })
                     }
                     _ => (None, String::new()),
                 },
@@ -1291,8 +1262,10 @@ mod tests {
     fn single_series_title_and_formats() {
         let s =
             sheet(&[("A1", "Month"), ("B1", "Sales"), ("A2", "Jan"), ("B2", "₹1,500"), ("A3", "Feb"), ("B3", "2500")]);
-        let chart = chart_for_range(&s, rng("A1:B3"), ChartType::Line).unwrap();
+        let mut chart = chart_for_range(&s, rng("A1:B3"), ChartType::Line).unwrap();
         assert_eq!(chart.legend, LegendPos::None);
+        assert_eq!(compute_view(&chart, &One(&s), 200.0, 400.0).series[0].labels[0], "");
+        chart.data_labels = true;
         let v = compute_view(&chart, &One(&s), 200.0, 400.0);
         assert_eq!(v.title.as_deref(), Some("Sales"));
         assert_eq!(v.series[0].labels[0], "₹1,500");

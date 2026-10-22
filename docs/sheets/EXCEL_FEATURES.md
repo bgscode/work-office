@@ -118,9 +118,10 @@ When you finish an item, update its row in the same pull request.
 
 | Feature | Status | Priority | Milestone |
 |---|---|---|---|
-| Charts: column, bar, line, pie (insert from selection, move, resize, title, legend) | ⬜ | P1 | M5 |
-| Charts: area, scatter, combo; axis and series formatting | ⬜ | P2 | – |
-| Insert images | ⬜ | P2 | – |
+| Charts: column, bar, line, pie (insert from selection, move, resize, title, legend) | ✅ | P1 | M5 |
+| Charts: stacked / 100% variants, area, doughnut, scatter; data labels, axis titles, colour sets, switch row/column, select data, change type | ✅ | P2 | M5 |
+| Charts: combo, secondary axis, trendlines, per-point formatting, in-place title editing | ⬜ | P2 | – |
+| Insert images (PNG, JPEG, GIF, BMP), move, resize, saved in .xlsx | ✅ | P2 | M5 |
 | Sparklines | ⬜ | P3 | – |
 | Shapes, text boxes | ⬜ | P3 | – |
 

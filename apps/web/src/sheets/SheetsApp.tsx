@@ -68,6 +68,9 @@ import { StatusBar } from "./StatusBar";
 import { WorkbookTitle, type SaveStatus } from "./WorkbookTitle";
 import { Icon } from "@office/ui";
 import { Select } from "./Select";
+import { ChartTitlesDialog, SelectDataDialog, chartDesignTab, insertChartCommands, type ChartContext, type ChartDialog } from "./features/charts";
+import { rectAnchor } from "./charts/DrawingLayer";
+import type { AnchorArray, ChartTypeId, DrawingInfo } from "./charts/types";
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 /** Listed first in autocomplete when they match, since most people want these. */
@@ -139,6 +142,10 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
   const [savedRevision, setSavedRevision] = useState(0);
   const [saveFailed, setSaveFailed] = useState(false);
   const changed = () => setRevision((r) => r + 1);
+  // Charts and pictures: the selected drawing, its dialog, and ribbon tab switching.
+  const [selectedDrawing, setSelectedDrawing] = useState<number | null>(null);
+  const [chartDialog, setChartDialog] = useState<ChartDialog | null>(null);
+  const [showTab, setShowTab] = useState<{ id: string; seq: number } | null>(null);
   // Data tools: open dialog, filter dropdown, in-cell list, Circle Invalid Data, messages.
   const [dataDialog, setDataDialog] = useState<DataDialog | null>(null);
   const [filterMenu, setFilterMenu] = useState<{ col: number; x: number; y: number } | null>(null);
@@ -769,6 +776,114 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
     changed();
   }
 
+  // ---- charts and pictures
+
+  const drawings = useMemo(() => JSON.parse(doc.drawingsJson(sheet) || "[]") as DrawingInfo[], [doc, sheet, revision]);
+  const selectedInfo = drawings.find((d) => d.id === selectedDrawing) ?? null;
+  const selectedChart = selectedInfo?.kind === "chart" ? { id: selectedInfo.id, info: selectedInfo.chart } : null;
+
+  /** A spot for a new drawing: right of `area` (or the active cell), kept near the visible part of the sheet. */
+  function placeFor(area: Rect, w: number, h: number): AnchorArray {
+    const el = document.querySelector<HTMLElement>(".grid-scroller");
+    const viewLeft = (el?.scrollLeft ?? 0) / zoom;
+    const viewTop = (el?.scrollTop ?? 0) / zoom;
+    const viewW = (el?.clientWidth ?? 800) / zoom;
+    let x = geo.cols.x(area.right + 1) + 16;
+    if (x + w > viewLeft + viewW) x = Math.max(viewLeft + 16, viewLeft + viewW - w - 40);
+    const y = Math.max(geo.rows.y(area.top), viewTop + 16);
+    return rectAnchor(geo, { x, y, w, h });
+  }
+
+  function insertChart(type: ChartTypeId) {
+    if (editing) commit(0, 0);
+    const src = doc.chartSourceRange(sheet, sel.top, sel.left, sel.bottom, sel.right);
+    if (src.length !== 4) {
+      setMessage({ title: "Insert Chart", message: "Select a range with numbers first (for example a table with headers), then insert a chart." });
+      return;
+    }
+    const area = { top: src[0], left: src[1], bottom: src[2], right: src[3] };
+    const id = doc.insertChart(sheet, sel.top, sel.left, sel.bottom, sel.right, type, Float64Array.from(placeFor(area, 480, 288)));
+    if (id < 0) return;
+    changed();
+    setSelectedDrawing(id);
+    setShowTab((t) => ({ id: "chart-design", seq: (t?.seq ?? 0) + 1 }));
+  }
+
+  async function insertPicture() {
+    const file = await pickFile("image/png,image/jpeg,image/gif,image/bmp");
+    if (!file) return;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // Natural size, scaled down to fit a reasonable area like Excel does for big photos.
+    const size = await new Promise<{ w: number; h: number }>((resolve) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        resolve({ w: img.naturalWidth, h: img.naturalHeight });
+        URL.revokeObjectURL(url);
+      };
+      img.onerror = () => resolve({ w: 320, h: 240 });
+      img.src = url;
+    });
+    const scale = Math.min(1, 640 / size.w, 480 / size.h);
+    const w = Math.max(20, size.w * scale);
+    const h = Math.max(20, size.h * scale);
+    const at = { x: geo.cols.x(col), y: geo.rows.y(row), w, h };
+    try {
+      const id = doc.insertPicture(sheet, bytes, file.type || "image/png", Float64Array.from(rectAnchor(geo, at)));
+      changed();
+      setSelectedDrawing(id);
+    } catch {
+      setMessage({ title: "Insert Picture", message: "This picture type isn't supported. Use a PNG, JPEG, GIF or BMP file." });
+    }
+  }
+
+  function formatChart(key: string, value: string): boolean {
+    if (selectedDrawing === null) return false;
+    try {
+      const ok = doc.formatChart(sheet, selectedDrawing, key, value);
+      if (ok) changed();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+
+  function deleteDrawing(id: number) {
+    if (doc.deleteDrawing(sheet, id)) changed();
+    setSelectedDrawing(null);
+  }
+
+  const chartCtx: ChartContext = {
+    chart: selectedChart,
+    insertChart,
+    insertPicture: () => void insertPicture(),
+    format: (key, value) => void formatChart(key, value),
+    remove: () => selectedDrawing !== null && deleteDrawing(selectedDrawing),
+    reorder: (toFront) => {
+      if (selectedDrawing !== null && doc.reorderDrawing(sheet, selectedDrawing, toFront)) changed();
+    },
+    openDialog: setChartDialog,
+  };
+
+  function drawingMenu(id: number, x: number, y: number) {
+    const d = drawings.find((it) => it.id === id);
+    setMenu({
+      x,
+      y,
+      items: [
+        ...(d?.kind === "chart"
+          ? [
+              { label: "Select Data…", onRun: () => setChartDialog("selectData") },
+              { label: "Edit Titles…", onRun: () => setChartDialog("titles") },
+            ]
+          : []),
+        { label: "Bring to Front", icon: "bringFront", onRun: () => doc.reorderDrawing(sheet, id, true) && changed(), separatorBefore: d?.kind === "chart" },
+        { label: "Send to Back", icon: "sendBack", onRun: () => doc.reorderDrawing(sheet, id, false) && changed() },
+        { label: d?.kind === "chart" ? "Delete Chart" : "Delete Picture", shortcut: "Del", icon: "trash", onRun: () => deleteDrawing(id), separatorBefore: true },
+      ],
+    });
+  }
+
   // ---- data tools: filter, sort, remove duplicates, validation, conditional formatting
 
   function toggleFilter() {
@@ -1271,6 +1386,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       id: "insert",
       label: "Insert",
       commands: [
+        ...insertChartCommands(chartCtx),
         { id: "row-above", label: "Row above", title: "Insert rows above the selection.", icon: "insertRowAbove", size: "small", group: "Cells", onRun: () => insertLines("rows", false) },
         { id: "row-below", label: "Row below", title: "Insert rows below the selection.", icon: "insertRowBelow", size: "small", group: "Cells", onRun: () => insertLines("rows", true) },
         { id: "col-left", label: "Column left", title: "Insert columns left of the selection.", icon: "insertColumnLeft", size: "small", group: "Cells", onRun: () => insertLines("cols", false) },
@@ -1321,6 +1437,9 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
     },
   ];
 
+  const designTab = chartDesignTab(chartCtx);
+  if (designTab) tabs.push({ ...designTab, contextual: true });
+
   function addSheet() {
     setSheet(doc.addSheet());
     setSelection(single({ row: 0, col: 0 }));
@@ -1341,7 +1460,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
         onUndo={undo}
         onRedo={redo}
       />
-      <Ribbon tabs={tabs} initialTab="home" />
+      <Ribbon tabs={tabs} initialTab="home" showTab={showTab} />
       <FormulaBar
         inputRef={barInputRef}
         nameBox={
@@ -1409,6 +1528,13 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
           onTabMove={() => {
             if (tabStart.current?.row !== row) tabStart.current = { row, col };
           }}
+          selectedDrawing={selectedDrawing}
+          onSelectDrawing={setSelectedDrawing}
+          onDrawingAnchor={(id, anchor) => {
+            if (doc.setDrawingAnchor(sheet, id, Float64Array.from(anchor))) changed();
+          }}
+          onDeleteDrawing={deleteDrawing}
+          onDrawingMenu={drawingMenu}
           onEnterAfterTabs={() => {
             const start = tabStart.current;
             tabStart.current = null;
@@ -1443,6 +1569,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
               commit(0, 0);
             }
             setSheet(i);
+            setSelectedDrawing(null);
             setSelection(single({ row: 0, col: 0 }));
           }}
           onAdd={addSheet}
@@ -1485,6 +1612,12 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       )}
       {insertFunctionOpen && <InsertFunctionDialog onInsert={closeInsertFunction} onClose={() => closeInsertFunction(null)} />}
       {renderDataDialog()}
+      {chartDialog === "titles" && selectedChart && (
+        <ChartTitlesDialog info={selectedChart.info} onApply={(k, v) => formatChart(k, v)} onClose={() => setChartDialog(null)} />
+      )}
+      {chartDialog === "selectData" && selectedChart && (
+        <SelectDataDialog info={selectedChart.info} onApply={(range) => formatChart("source", range)} onClose={() => setChartDialog(null)} />
+      )}
       {filterMenu && filter && (
         <FilterMenu
           key={`${sheet}:${filterMenu.col}`}

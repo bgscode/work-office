@@ -55,6 +55,17 @@ change and cached in `crates/wasm`. The UI is in
 `apps/web/src/sheets/features/dataTools.tsx`; `.xlsx` reading and writing in
 `crates/formats/src/xlsx_data_tools.rs`, within the single worksheet pass.
 
+## Charts and pictures
+
+Drawings live in `Sheet::drawings()` and are anchored to cells (a cell plus a
+pixel offset for each corner), so they follow column widths, row heights and
+inserted or deleted lines. A chart stores references to its data, never the
+numbers: `chart_view` reads the cells each time the chart is drawn, so it
+updates live. The UI turns anchors into pixels with the grid's layout
+(`apps/web/src/sheets/charts/DrawingLayer.tsx`) and draws charts on a canvas
+(`charts/renderChart.ts`). `.xlsx` drawings, charts and media are read and
+written by `crates/formats/src/xlsx/drawings.rs`.
+
 ## Kinds of edits
 
 | Edit | Engine op | Undo |
@@ -65,6 +76,7 @@ change and cached in `crates/wasm`. The UI is in
 | Column width | `SetColWidths` | previous widths |
 | Insert/delete rows or columns, sort | `ReplaceSheet` (formulas rewritten by `formula/refs.rs`) | the old sheet |
 | Filter, data validation, conditional formatting | `SetDataTools` (`data_tools.rs`) | previous settings |
+| Insert, move, resize, format or delete a chart or picture | `SetDrawings` (`chart.rs`) | previous drawings |
 | Remove duplicates, custom sort, sort from a filter | `ReplaceSheet` | the old sheet |
 | Add/rename/delete sheet | `InsertSheet`, `RenameSheet`, `RemoveSheet` | the inverse op |
 

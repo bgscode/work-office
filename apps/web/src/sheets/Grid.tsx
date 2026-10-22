@@ -29,6 +29,8 @@ import { HEADER_HEIGHT, HEADER_WIDTH, MAX_COLS, MAX_ROWS, colName, selectionRect
 import { DEFAULT_ROW_HEIGHT } from "./layout";
 import { navigate } from "./merges";
 import type { FilterInfo } from "./features/dataTools";
+import { DrawingLayer } from "./charts/DrawingLayer";
+import type { AnchorArray } from "./charts/types";
 import { FILL_HANDLE_SIZE, filterButtonBox, makePanes, paint, type SheetGeometry } from "./paint";
 import { Panes } from "./panes";
 import { FORMULA_BAR_ID, type EditState } from "./types";
@@ -109,6 +111,12 @@ export interface GridProps {
   onTabMove: () => void;
   /** Enter (not editing): returns true when it went back to where the Tabs started. */
   onEnterAfterTabs: () => boolean;
+  /** Charts and pictures: the selected one, and what happens to them. */
+  selectedDrawing: number | null;
+  onSelectDrawing: (id: number | null) => void;
+  onDrawingAnchor: (id: number, anchor: AnchorArray) => void;
+  onDeleteDrawing: (id: number) => void;
+  onDrawingMenu: (id: number, x: number, y: number) => void;
 }
 
 type Hit =
@@ -380,6 +388,7 @@ export function Grid(props: GridProps) {
   }
 
   function onMouseDown(e: MouseEvent) {
+    if (props.selectedDrawing !== null) props.onSelectDrawing(null);
     if (e.button !== 0) return;
     const hit = hitTest(e);
     if (hit.onScrollbar) return;
@@ -697,6 +706,37 @@ export function Grid(props: GridProps) {
         onContextMenu={onContextMenu}
       >
         <div style={{ width: (HEADER_WIDTH + cols.x(colCount)) * zoom, height: (HEADER_HEIGHT + rows.y(rowCount)) * zoom }} />
+      </div>
+      <div className="drawing-clip" style={{ width: Math.max(0, size.width), height: Math.max(0, size.height) }}>
+        <DrawingLayer
+          doc={doc}
+          sheet={sheet}
+          revision={revision}
+          geo={geo}
+          scroll={logicalScroll}
+          zoom={zoom}
+          selected={props.selectedDrawing}
+          onSelect={(id) => {
+            props.onSelectDrawing(id);
+            if (id === null) inputRef.current?.focus({ preventScroll: true });
+          }}
+          onAnchor={props.onDrawingAnchor}
+          onDelete={(id) => {
+            props.onDeleteDrawing(id);
+            inputRef.current?.focus({ preventScroll: true });
+          }}
+          onContextMenu={props.onDrawingMenu}
+          onWheel={(dx, dy) => scrollerRef.current?.scrollBy(dx, dy)}
+          onKey={(e) => {
+            const mod = e.metaKey || e.ctrlKey;
+            const key = e.key.toLowerCase();
+            if (mod && (key === "z" || key === "y")) {
+              e.preventDefault();
+              if (key === "y" || e.shiftKey) props.onRedo();
+              else props.onUndo();
+            }
+          }}
+        />
       </div>
       <textarea
         ref={inputRef}

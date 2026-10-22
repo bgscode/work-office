@@ -369,6 +369,57 @@ const ICONS: Record<string, Paths> = {
       <path d="M8 8h6a6 6 0 0 1-2 4.5z" fill={GREEN} />
     </>
   ),
+  chartScatter: () => (
+    <>
+      <path d="M1.5 1.5v13h13" {...s} />
+      <circle cx="5" cy="10.5" r="1.3" fill={BLUE} />
+      <circle cx="7.5" cy="7" r="1.3" fill={BLUE} />
+      <circle cx="10.5" cy="8.5" r="1.3" fill={GOLD} />
+      <circle cx="12.5" cy="4" r="1.3" fill={GOLD} />
+    </>
+  ),
+  picture: () => (
+    <>
+      <rect x="1.5" y="2.5" width="13" height="11" rx="0.5" {...s} />
+      <circle cx="5.5" cy="6" r="1.5" fill={GOLD} />
+      <path d="M2 12.5l4-4 3 3 2-2 3.5 3.5" {...s} stroke={GREEN} />
+    </>
+  ),
+  chartElement: () => (
+    <>
+      <rect x="1.5" y="2.5" width="11" height="11" {...s} />
+      <rect x="3.5" y="8" width="2" height="4" fill={BLUE} />
+      <rect x="7" y="5.5" width="2" height="6.5" fill={BLUE} />
+      <path d="M12.5 1v5M10 3.5h5" {...s} stroke={GREEN} strokeWidth={1.5} />
+    </>
+  ),
+  chartColors: () => (
+    <>
+      <rect x="2" y="2" width="5.5" height="5.5" fill={BLUE} />
+      <rect x="8.5" y="2" width="5.5" height="5.5" fill={GOLD} />
+      <rect x="2" y="8.5" width="5.5" height="5.5" fill={GREEN} />
+      <rect x="8.5" y="8.5" width="5.5" height="5.5" fill={RED} />
+    </>
+  ),
+  switchRowCol: () => (
+    <>
+      <rect x="1.5" y="1.5" width="6" height="6" {...s} />
+      <rect x="8.5" y="8.5" width="6" height="6" {...s} fill={BLUE} fillOpacity={0.3} />
+      <path d="M10 2.5h2.5V5M12.5 2.5L9.5 5.5M6 13.5H3.5V11M3.5 13.5l3-3" {...s} stroke={GREEN} />
+    </>
+  ),
+  bringFront: () => (
+    <>
+      <rect x="1.5" y="1.5" width="8" height="8" {...s} />
+      <rect x="6.5" y="6.5" width="8" height="8" {...s} fill={BLUE} />
+    </>
+  ),
+  sendBack: () => (
+    <>
+      <rect x="6.5" y="6.5" width="8" height="8" {...s} fill={BLUE} />
+      <rect x="1.5" y="1.5" width="8" height="8" {...s} fill="#fff" />
+    </>
+  ),
   freeze: () => (
     <>
       <rect x="1.5" y="1.5" width="13" height="13" {...s} />

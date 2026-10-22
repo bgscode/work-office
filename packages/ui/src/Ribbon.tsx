@@ -70,6 +70,8 @@ export interface RibbonTab {
   id: string;
   label: string;
   commands: RibbonCommand[];
+  /** A contextual tab (e.g. Chart Design) shown only while something is selected. */
+  contextual?: boolean;
 }
 
 const COLLAPSED_KEY = "office.ribbon.collapsed";
@@ -154,14 +156,29 @@ function splitRows(commands: RibbonCommand[]): RibbonCommand[][] {
   return rows;
 }
 
-export function Ribbon({ tabs, initialTab, trailing }: { tabs: RibbonTab[]; initialTab?: string; trailing?: ReactNode }) {
+export function Ribbon({
+  tabs,
+  initialTab,
+  trailing,
+  showTab,
+}: {
+  tabs: RibbonTab[];
+  initialTab?: string;
+  trailing?: ReactNode;
+  /** Switch to tab `id` whenever `seq` changes (e.g. Chart Design after inserting a chart). */
+  showTab?: { id: string; seq: number } | null;
+}) {
   const [active, setActive] = useState(initialTab ?? tabs[0]?.id);
+  useEffect(() => {
+    if (showTab) setActive(showTab.id);
+  }, [showTab?.seq]);
   const [collapsed, setCollapsedState] = useState(savedCollapsed);
   /** While collapsed: the commands are showing temporarily. */
   const [floating, setFloating] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const current = tabs.find((t) => t.id === active) ?? tabs[0];
+  // A contextual tab that went away falls back to the initial tab, not File.
+  const current = tabs.find((t) => t.id === active) ?? tabs.find((t) => t.id === initialTab) ?? tabs[0];
   const baseId = useId();
 
   const setCollapsed = useCallback((value: boolean) => {
@@ -242,7 +259,7 @@ export function Ribbon({ tabs, initialTab, trailing }: { tabs: RibbonTab[]; init
             aria-selected={t.id === current?.id}
             aria-controls={panelId}
             tabIndex={t.id === current?.id ? 0 : -1}
-            className={t.id === current?.id && showPanel ? "active" : t.id === current?.id ? "current" : ""}
+            className={[t.id === current?.id && showPanel ? "active" : t.id === current?.id ? "current" : "", t.contextual ? "contextual" : ""].join(" ").trim()}
             data-tab={t.id}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
