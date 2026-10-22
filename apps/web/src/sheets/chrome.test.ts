@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { groupCommands, layoutGroup, type RibbonCommand } from "@office/ui";
-import { insertFunctionText, searchFunctions, sliderToZoom, statusMode, stepZoom, zoomToSlider } from "./chrome";
+import { autoSumRange, insertFunctionText, searchFunctions, sliderToZoom, statusMode, stepZoom, zoomToSlider } from "./chrome";
 
 describe("statusMode", () => {
   it("follows Excel's Ready / Enter / Edit / Point", () => {
@@ -90,5 +90,16 @@ describe("ribbon layout", () => {
     expect(segs[3].kind === "rows" && segs[3].rows.map((r) => r.map((c) => c.id))).toEqual([["b", "i"], ["u"]]);
     const auto = layoutGroup(["a", "b", "c", "d", "e"].map((id) => cmd(id)));
     expect(auto[0].kind === "rows" && auto[0].rows.map((r) => r.length)).toEqual([3, 2]);
+  });
+});
+
+describe("autoSumRange", () => {
+  // Numbers in A1:A3 and B5:D5.
+  const numbers = new Set(["0,0", "1,0", "2,0", "4,1", "4,2", "4,3"]);
+  const isNumber = (r: number, c: number) => numbers.has(`${r},${c}`);
+  it("adds up the numbers above, else to the left", () => {
+    expect(autoSumRange(3, 0, isNumber)).toEqual({ top: 0, left: 0, bottom: 2, right: 0 });
+    expect(autoSumRange(4, 4, isNumber)).toEqual({ top: 4, left: 1, bottom: 4, right: 3 });
+    expect(autoSumRange(9, 9, isNumber)).toBeNull();
   });
 });

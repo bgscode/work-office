@@ -315,3 +315,29 @@ test("defined names: Name Box, formulas, Name Manager", async ({ page }) => {
   await expect(page.locator('.ribbon-commands button[aria-label="Show Formulas"]')).toHaveAttribute("aria-pressed", "true");
   await expectNoErrors(errors);
 });
+
+test("AutoSum: Alt+= under a column, and totals for a selection", async ({ page }) => {
+  const { errors, cell } = await openWorkbook(page);
+  await clickCell(page, await cell(0, 0));
+  await typeRows(page, TABLE);
+  // B6 is under the amounts: Alt+= proposes =SUM(B2:B5).
+  await clickCell(page, await cell(5, 1));
+  await page.keyboard.press("Alt+Equal");
+  await expect(page.locator(".cell-editor")).toHaveValue("=SUM(B2:B5)");
+  await page.keyboard.press("Enter");
+  await clickCell(page, await cell(5, 1));
+  await expect(formulaBar(page)).toHaveValue("=SUM(B2:B5)");
+  // A selection gets a total under it from the menu.
+  await clickCell(page, await cell(1, 1));
+  await page.keyboard.down("Shift");
+  await clickCell(page, await cell(4, 1));
+  await page.keyboard.up("Shift");
+  // At the test's window width the Editing group is folded into one button.
+  const folded = page.locator('.ribbon-group.folded[aria-label="Editing"] > button');
+  if (await folded.isVisible()) await folded.click();
+  await ribbonCommand(page, "AutoSum options");
+  await menuItem(page, "Average");
+  await clickCell(page, await cell(5, 1));
+  await expect(formulaBar(page)).toHaveValue("=AVERAGE(B2:B5)");
+  await expectNoErrors(errors);
+});

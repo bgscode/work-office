@@ -92,6 +92,7 @@ When you finish an item, update its row in the same pull request.
 | Named ranges: Name Box, Define Name, Name Manager (Ctrl+F3), workbook/sheet scope, names in formulas and autocomplete, saved in .xlsx | ✅ | P1 | I3 |
 | Dynamic arrays that spill: `FILTER`, `SORT`, `SORTBY`, `UNIQUE`, `SEQUENCE`, `TAKE`, `DROP`, `VSTACK`, `TEXTSPLIT`…; element-wise operators; `#SPILL!` | ✅ | P1 | I2 |
 | Show formulas (Ctrl+`) | ✅ | P2 | I3 |
+| AutoSum (Alt+=): Sum, Average, Count Numbers, Max, Min over the numbers above or to the left; totals under a selection | ✅ | P1 | I4 |
 | Error checking, trace precedents/dependents | ⬜ | P3 | – |
 | `LET`, `XMATCH` | ✅ | P2 | I2 |
 | `LAMBDA`, `MAP`, `REDUCE`, array constants `{1,2;3,4}` | ⬜ | P3 | – |
@@ -126,7 +127,7 @@ When you finish an item, update its row in the same pull request.
 | Insert images (PNG, JPEG, GIF, BMP), move, resize, saved in .xlsx | ✅ | P2 | M5 |
 | Shapes and text boxes (Excel's preset gallery, fill/outline/text formatting), saved in .xlsx | ✅ | P2 | M5 |
 | Sparklines | ⬜ | P3 | – |
-| Shapes, text boxes | ⬜ | P3 | – |
+| Shapes, text boxes | ✅ | P3 | M7 |
 
 ## 7. Sheets and workbook
 
@@ -148,8 +149,8 @@ When you finish an item, update its row in the same pull request.
 | Print and export to PDF: File → Print with preview (Ctrl+P), Page Layout tab, Page Setup dialog (margins, orientation, paper, scaling, print area, print titles, header/footer, gridlines, headings); charts and pictures print | ✅ | P1 | M6 |
 | `.xlsx` round-trip for every M1–M5 feature (borders, merges, fonts, row heights, freeze panes, filters, validation, conditional formatting, charts, page setup) — `crates/formats/tests/round_trip.rs` | ✅ | P1 | M6 |
 | Open delimited text with the delimiter detected (.csv, .tsv, .txt; comma, semicolon, tab, pipe) | ✅ | P1 | M6 |
-| Page setup: margins, headers/footers, repeat header rows | ⬜ | P2 | – |
-| CSV options: delimiter, encoding | ⬜ | P2 | – |
+| Page setup: margins, headers/footers, repeat header rows | ✅ | P2 | M6 |
+| CSV options: delimiter, encoding | 🟡 | P2 | M6 (delimiter detected) |
 | `.ods` (LibreOffice) | ⬜ | P2 | – |
 | Old `.xls` (Excel 97–2003) | ⬜ | P3 | – |
 

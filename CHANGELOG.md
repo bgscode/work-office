@@ -14,6 +14,8 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Added
 
+- AutoSum (Home → Editing, Alt+=): Sum, Average, Count Numbers, Max or Min of the numbers above the cell (else to its left), ready to adjust before Enter; with a range selected, a total goes under each column.
+
 - Defined names: type a name in the Name Box to name the selected cells, or use Formulas → Define Name / Name Manager (Ctrl+F3) with workbook or sheet scope and comments. Formulas use names (`=SUM(Sales)*(1+GST)`), autocomplete suggests them, the Name Box goes to them, and they follow renamed or deleted sheets and inserted or deleted rows. Saved in .xlsx. Formulas → Show Formulas (Ctrl+`).
 
 - Dynamic arrays (Excel 365): formulas that return several values spill into the cells around them, with `#SPILL!` when something is in the way (it spills again once cleared); spilled cells show their formula greyed in the formula bar and the area is outlined. Operators and functions like `IF`, `UPPER`, `ROUND` work element by element (`=A2:A10*B2:B10`, `=SUM(A2:A10*B2:B10)`). New functions: `FILTER`, `SORT`, `SORTBY`, `UNIQUE`, `SEQUENCE`, `RANDARRAY`, `TRANSPOSE`, `TAKE`, `DROP`, `CHOOSEROWS`, `CHOOSECOLS`, `VSTACK`, `HSTACK`, `TOCOL`, `TOROW`, `EXPAND`, `TEXTSPLIT`, `XMATCH`, `LET`; omitted arguments (`SORT(A1:A9,,-1)`). Saved to .xlsx as array formulas with `_xlfn` names; Excel's dynamic arrays open correctly.

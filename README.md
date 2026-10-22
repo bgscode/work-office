@@ -43,6 +43,7 @@ Opening the app shows a start page like Microsoft 365's: create a blank workbook
 | Ctrl/⌘ + Home / End | First cell / last used cell |
 | Ctrl + G or F5, or type in the Name Box | Go to a cell or range |
 | Shift + Space / Ctrl + Space | Select row / column |
+| Alt + = | AutoSum |
 | Shift + arrows | Extend selection |
 | Type anything | Replace cell content |
 | F2 or double-click | Edit cell content |

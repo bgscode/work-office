@@ -24,6 +24,7 @@ import {
   MAX_ROWS,
   ROW_HEIGHT,
   clampToExtent,
+  colName,
   moveSelection,
   rangeName,
   selectionRect,
@@ -65,7 +66,7 @@ import { fontFor } from "./paint";
 import { NameBox } from "./NameBox";
 import { SheetTabs } from "./SheetTabs";
 import type { EditState } from "./types";
-import { MOD_KEY, insertFunctionText, statusMode, zoomToFit } from "./chrome";
+import { MOD_KEY, autoSumRange, insertFunctionText, statusMode, zoomToFit } from "./chrome";
 import { InsertFunctionDialog } from "./InsertFunctionDialog";
 import { ColumnLayout, DEFAULT_COL_WIDTH } from "./layout";
 import { StatusBar } from "./StatusBar";
@@ -527,6 +528,30 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
     }
     doc.setInputs(sheet, Uint32Array.from(rows), Uint32Array.from(cols), inputs);
     changed();
+  }
+
+  /**
+   * Home → AutoSum (Alt+=). One cell: start `=SUM(…)` over the numbers above
+   * it (else to its left), ready to change. A range: a total under each column.
+   */
+  function autoSum(fn: string) {
+    if (editing) commit(0, 0);
+    const ref = (r: number, c: number) => `${colName(c)}${r + 1}`;
+    if (sel.top === sel.bottom && sel.left === sel.right) {
+      const above = doc.kindBlock(sheet, 0, col, row, 1);
+      const left = doc.kindBlock(sheet, row, 0, 1, col);
+      const area = autoSumRange(row, col, (r, c) => (c === col ? above[r] : left[c]) === ValueKind.Number);
+      const args = area ? `${ref(area.top, area.left)}:${ref(area.bottom, area.right)}` : "";
+      const draft = `=${fn}(${args})`;
+      setEditing({ draft, source: "cell", mode: "edit", caret: draft.length - 1, sheet, cell: { row, col } });
+      pendingCaret.current = draft.length - 1;
+      setAssistDismissedAt(null);
+      setAssistIndex(0);
+      return;
+    }
+    // Totals go in the row under the selection, one per column.
+    const target = { top: sel.bottom + 1, left: sel.left, bottom: sel.bottom + 1, right: sel.right };
+    setRect(target, (_r, c) => `=${fn}(${ref(sel.top, c)}:${ref(sel.bottom, c)})`);
   }
 
   function clear() {
@@ -1230,6 +1255,10 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       e.preventDefault();
       if (editing) commit(0, 0);
       setNameDialog("manager");
+    } else if (e.altKey && !mod && (e.key === "=" || e.code === "Equal")) {
+      // Alt+=: AutoSum.
+      e.preventDefault();
+      autoSum("SUM");
     } else if (e.key === "F12") {
       e.preventDefault();
       if (editing) commit(0, 0);
@@ -1516,6 +1545,23 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
             ...formatMenuItems(layoutCtx),
             { id: "menu-format-cells", label: "Format Cells…", shortcut: `${MOD_KEY}1`, icon: "formatCells", onRun: () => setFormatDialog("number"), separatorBefore: true },
             { id: "menu-rename-sheet", label: "Rename Sheet", icon: "rename", onRun: () => setRenamingTab(sheet), separatorBefore: true },
+          ],
+        },
+        {
+          id: "autosum",
+          label: "AutoSum",
+          title: `AutoSum (Alt+=)\nAdd up the numbers above or to the left; the total appears after them.`,
+          icon: "autoSum",
+          size: "small",
+          group: "Editing",
+          onRun: () => autoSum("SUM"),
+          menu: [
+            { id: "autosum-sum", label: "Sum", shortcut: "Alt+=", onRun: () => autoSum("SUM") },
+            { id: "autosum-average", label: "Average", onRun: () => autoSum("AVERAGE") },
+            { id: "autosum-count", label: "Count Numbers", onRun: () => autoSum("COUNT") },
+            { id: "autosum-max", label: "Max", onRun: () => autoSum("MAX") },
+            { id: "autosum-min", label: "Min", onRun: () => autoSum("MIN") },
+            { id: "autosum-more", label: "More Functions…", onRun: () => setInsertFunctionOpen(true), separatorBefore: true },
           ],
         },
         {

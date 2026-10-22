@@ -78,3 +78,26 @@ export function searchFunctions<T extends { name: string; summary: string }>(all
 
 /** "Ctrl+" on Windows/Linux, "⌘" on Mac, for shortcut labels. */
 export const MOD_KEY = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
+
+/** Rectangle of cells, inclusive. */
+interface Area {
+  top: number;
+  left: number;
+  bottom: number;
+  right: number;
+}
+
+/**
+ * Home → AutoSum (Alt+=): the numbers next to the active cell, like Excel —
+ * the run of numbers right above it, else the run to its left. `isNumber`
+ * tells whether a cell holds a number. Null when there is nothing to add up.
+ */
+export function autoSumRange(row: number, col: number, isNumber: (row: number, col: number) => boolean): Area | null {
+  let r = row - 1;
+  while (r >= 0 && isNumber(r, col)) r--;
+  if (r < row - 1) return { top: r + 1, left: col, bottom: row - 1, right: col };
+  let c = col - 1;
+  while (c >= 0 && isNumber(row, c)) c--;
+  if (c < col - 1) return { top: row, left: c + 1, bottom: row, right: col - 1 };
+  return null;
+}
