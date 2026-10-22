@@ -167,7 +167,12 @@ impl Parser {
             let mut args = Vec::new();
             if !self.eat(&Token::RParen) {
                 loop {
-                    args.push(self.comparison()?);
+                    // An omitted argument, as in `SORT(A1:A9,,-1)`.
+                    if matches!(self.peek(), Some(Token::Comma) | Some(Token::RParen)) {
+                        args.push(Expr::Missing);
+                    } else {
+                        args.push(self.comparison()?);
+                    }
                     if self.eat(&Token::RParen) {
                         break;
                     }

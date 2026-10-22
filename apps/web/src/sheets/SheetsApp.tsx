@@ -293,6 +293,12 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
 
   const saveStatus: SaveStatus = revision !== savedRevision ? "saving" : saveFailed ? "failed" : "saved";
 
+  /** A spilled cell shows the formula it comes from, greyed. */
+  function spillGhost(): string {
+    const r = doc.spillRange(sheet, row, col);
+    return r.length === 4 && (r[0] !== row || r[1] !== col) ? doc.input(sheet, r[0], r[1]) : "";
+  }
+
   // ---- editing
 
   function startEdit(source: EditState["source"], initialText?: string) {
@@ -1622,6 +1628,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
           />
         }
         input={doc.input(sheet, row, col)}
+        ghost={spillGhost()}
         editing={editing}
         onStartEdit={() => startEdit("bar")}
         onDraftChange={changeDraft}

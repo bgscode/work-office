@@ -164,7 +164,23 @@ pub struct Sheet {
     layout: SheetLayout,
     /// AutoFilter, data validation and conditional formatting (see `data_tools.rs`).
     pub(crate) tools: crate::data_tools::DataTools,
+    /// Dynamic arrays: formula cell -> the area its result fills and the values.
+    spills: HashMap<CellRef, Spill>,
+    /// Every cell a spill fills (except its formula cell) -> that formula cell.
+    spill_owner: HashMap<CellRef, CellRef>,
+    /// Formulas showing `#SPILL!`, with the area they would fill once it is empty.
+    spill_blocked: HashMap<CellRef, Range>,
 }
+
+/// The values a dynamic array formula fills in, row-major over `range`.
+#[derive(Debug, Clone)]
+struct Spill {
+    range: Range,
+    values: Vec<Value>,
+}
+
+/// Spills that keep re-spilling into each other stop after this many rounds.
+const MAX_SPILL_ROUNDS: u32 = 8;
 
 static EMPTY: Value = Value::Empty;
 static DEFAULT_STYLE: Style = Style {
@@ -198,10 +214,85 @@ impl Sheet {
     pub fn set_inputs(&mut self, edits: impl IntoIterator<Item = (CellRef, String)>) {
         let mut changed = Vec::new();
         for (at, input) in edits {
-            self.write(at, input);
-            changed.push(at);
+            changed.extend(self.write_tracked(at, input));
         }
         self.recalc_from(&changed);
+    }
+
+    /// `write`, plus what it means for dynamic arrays: returns the cells whose
+    /// values may change (the cell, a spill it ended, and formulas whose spill
+    /// area it is in, which must spill again or show `#SPILL!`).
+    pub(crate) fn write_tracked(&mut self, at: CellRef, input: String) -> Vec<CellRef> {
+        let mut changed = self.clear_spill(at);
+        changed.push(at);
+        if let Some(anchor) = self.spill_owner.get(&at) {
+            changed.push(*anchor);
+        }
+        changed.extend(self.spill_blocked.iter().filter(|(a, r)| **a != at && r.contains(at)).map(|(a, _)| *a));
+        self.write(at, input);
+        changed
+    }
+
+    /// The area a dynamic array formula fills (its own cell included), if it spills.
+    pub fn spill_range(&self, at: CellRef) -> Option<Range> {
+        self.spills.get(&at).map(|s| s.range)
+    }
+
+    /// Every spilling formula with the area it fills.
+    pub fn spill_ranges(&self) -> Vec<(CellRef, Range)> {
+        self.spills.iter().map(|(a, s)| (*a, s.range)).collect()
+    }
+
+    /// The formula cell whose spill fills `at` (not counting the formula cell itself).
+    pub fn spill_anchor(&self, at: CellRef) -> Option<CellRef> {
+        self.spill_owner.get(&at).copied()
+    }
+
+    /// End the spill of the formula in `at`; returns the cells it filled.
+    fn clear_spill(&mut self, at: CellRef) -> Vec<CellRef> {
+        self.spill_blocked.remove(&at);
+        let Some(sp) = self.spills.remove(&at) else { return Vec::new() };
+        let cells: Vec<CellRef> = sp.range.cells().filter(|c| *c != at).collect();
+        for c in &cells {
+            self.spill_owner.remove(c);
+        }
+        cells
+    }
+
+    /// Store a formula's result: a value, or an array that spills from `at`
+    /// down and right when those cells are empty (`#SPILL!` otherwise).
+    /// Returns the cells whose values changed besides `at`.
+    pub(crate) fn store_result(&mut self, at: CellRef, result: crate::functions::Arg) -> Vec<CellRef> {
+        use crate::functions::Arg;
+        let mut touched = self.clear_spill(at);
+        let r = match result {
+            Arg::Value(v) => {
+                self.store(at, v);
+                return touched;
+            }
+            Arg::Range(r) => r,
+        };
+        let (end_row, end_col) = (at.row as u64 + r.rows as u64 - 1, at.col as u64 + r.cols as u64 - 1);
+        if end_row >= MAX_ROWS as u64 || end_col >= MAX_COLS as u64 {
+            self.store(at, Value::Error(crate::ErrorKind::Spill));
+            return touched;
+        }
+        let range = Range::new(at, CellRef::new(end_row as u32, end_col as u32));
+        let blocked =
+            range.cells().any(|c| c != at && (self.cells.contains_key(&c) || self.spill_owner.contains_key(&c)));
+        if blocked {
+            self.spill_blocked.insert(at, range);
+            self.store(at, Value::Error(crate::ErrorKind::Spill));
+            return touched;
+        }
+        for c in range.cells().filter(|c| *c != at) {
+            self.spill_owner.insert(c, at);
+            touched.push(c);
+        }
+        self.store(at, r.values.first().cloned().unwrap_or(Value::Empty));
+        self.spills.insert(at, Spill { range, values: r.values });
+        self.extent = (self.extent.0.max(range.end.row + 1), self.extent.1.max(range.end.col + 1));
+        touched
     }
 
     /// The raw input of a cell ("" if empty).
@@ -227,7 +318,14 @@ impl Sheet {
     /// The current value of a cell.
     pub fn value(&self, at: CellRef) -> &Value {
         match self.cells.get(&at).map(|c| &c.content) {
-            None => &EMPTY,
+            None => match self.spill_owner.get(&at).and_then(|a| self.spills.get(a)) {
+                Some(sp) => {
+                    let cols = sp.range.cols();
+                    let i = ((at.row - sp.range.start.row) * cols + (at.col - sp.range.start.col)) as usize;
+                    sp.values.get(i).unwrap_or(&EMPTY)
+                }
+                None => &EMPTY,
+            },
             Some(Content::Literal(v)) => v,
             Some(Content::Formula { value, .. }) => value,
         }
@@ -360,7 +458,10 @@ impl Sheet {
                 }
             }
         }
-        self.recalc(formulas.into_iter().collect());
+        let spilled = self.recalc(formulas.into_iter().collect());
+        if !spilled.is_empty() {
+            self.recalc_from(&spilled);
+        }
     }
 
     /// Store an input without recalculating (the caller recalculates: the sheet
@@ -696,6 +797,16 @@ impl Sheet {
     /// Call `f` for every formula that reads cell `c` on this sheet. (Allocation-free:
     /// recalculation calls this once per formula.)
     fn for_each_dependent(&self, c: CellRef, mut f: impl FnMut(CellRef)) {
+        self.direct_dependents(c, &mut f);
+        // Formulas reading a spilled cell depend on the formula that spills there.
+        if let Some(sp) = self.spills.get(&c) {
+            for cell in sp.range.cells().filter(|x| *x != c) {
+                self.direct_dependents(cell, &mut f);
+            }
+        }
+    }
+
+    fn direct_dependents(&self, c: CellRef, f: &mut impl FnMut(CellRef)) {
         if let Some(set) = self.dependents.get(&c) {
             for d in set {
                 f(*d);
@@ -711,7 +822,11 @@ impl Sheet {
     /// Formulas that read cell `c` on this sheet.
     pub(crate) fn dependents_of(&self, c: CellRef) -> impl Iterator<Item = CellRef> + '_ {
         let big = self.range_dependents.iter().filter(move |(r, _)| r.contains(c)).map(|(_, f)| *f);
-        self.dependents.get(&c).into_iter().flatten().copied().chain(big)
+        let mut spilled = Vec::new();
+        if self.spills.contains_key(&c) {
+            self.for_each_dependent(c, |d| spilled.push(d));
+        }
+        self.dependents.get(&c).into_iter().flatten().copied().chain(big).chain(spilled)
     }
 
     /// Formulas that read other sheets.
@@ -740,6 +855,10 @@ impl Sheet {
     }
 
     fn recalc_from(&mut self, changed: &[CellRef]) {
+        self.recalc_from_round(changed, 0);
+    }
+
+    fn recalc_from_round(&mut self, changed: &[CellRef], round: u32) {
         let mut dirty: HashSet<CellRef> = changed.iter().copied().filter(|&c| self.is_formula(c)).collect();
         dirty.extend(self.volatiles.iter().copied());
         let mut stack: Vec<CellRef> = dirty.iter().copied().chain(changed.iter().copied()).collect();
@@ -751,10 +870,17 @@ impl Sheet {
                 }
             }
         }
-        self.recalc(dirty);
+        let spilled = self.recalc(dirty);
+        // Spills that grew, shrank or moved change cells nothing waited on: recalculate their readers.
+        if !spilled.is_empty() && round < MAX_SPILL_ROUNDS {
+            self.recalc_from_round(&spilled, round + 1);
+        }
     }
 
-    fn recalc(&mut self, dirty: HashSet<CellRef>) {
+    /// Recalculate `dirty` in dependency order. Returns cells whose values
+    /// changed because a spill changed shape (for another round).
+    fn recalc(&mut self, dirty: HashSet<CellRef>) -> Vec<CellRef> {
+        let mut spilled = Vec::new();
         // In-degree = how many dirty formulas this formula still waits on.
         let mut waiting: HashMap<CellRef, usize> = dirty.iter().map(|&c| (c, 0)).collect();
         for p in &dirty {
@@ -767,28 +893,34 @@ impl Sheet {
         let mut ready: Vec<CellRef> = waiting.iter().filter(|(_, &n)| n == 0).map(|(&c, _)| c).collect();
         while let Some(c) = ready.pop() {
             waiting.remove(&c);
-            self.evaluate(c);
-            self.for_each_dependent(c, |f| {
+            // Dependents as counted above, before evaluating may change this formula's spill.
+            let mut deps = Vec::new();
+            self.for_each_dependent(c, |f| deps.push(f));
+            spilled.extend(self.evaluate(c));
+            for f in deps {
                 if let Some(n) = waiting.get_mut(&f) {
                     *n -= 1;
                     if *n == 0 {
                         ready.push(f);
                     }
                 }
-            });
+            }
         }
         // Whatever is still waiting is in (or downstream of) a cycle.
         for c in waiting.into_keys() {
+            spilled.extend(self.clear_spill(c));
             self.store(c, Value::Error(crate::ErrorKind::Circ));
         }
+        spilled
     }
 
-    fn evaluate(&mut self, at: CellRef) {
-        let value = match self.cells.get(&at) {
-            Some(Cell { content: Content::Formula { expr, .. }, .. }) => formula::eval_at(expr, self, at).0,
-            _ => return,
+    /// Evaluate one formula; returns cells a changed spill filled or emptied.
+    fn evaluate(&mut self, at: CellRef) -> Vec<CellRef> {
+        let result = match self.cells.get(&at) {
+            Some(Cell { content: Content::Formula { expr, .. }, .. }) => formula::eval_at_any(expr, self, at).0,
+            _ => return Vec::new(),
         };
-        self.store(at, value);
+        self.store_result(at, result)
     }
 
     pub(crate) fn store(&mut self, at: CellRef, v: Value) {

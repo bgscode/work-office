@@ -214,6 +214,16 @@ impl SheetsDocument {
         self.history.redo(&mut self.book)
     }
 
+    /// The dynamic array area a cell is part of (as its formula or a spilled
+    /// value): [top, left, bottom, right], or empty.
+    #[wasm_bindgen(js_name = spillRange)]
+    pub fn spill_range(&self, sheet: usize, row: u32, col: u32) -> Vec<u32> {
+        let s = self.sheet(sheet);
+        let at = CellRef::new(row, col);
+        let anchor = s.spill_anchor(at).unwrap_or(at);
+        s.spill_range(anchor).map_or(Vec::new(), |r| vec![r.start.row, r.start.col, r.end.row, r.end.col])
+    }
+
     /// Display text (number formats applied) for a block of cells, row-major.
     #[wasm_bindgen(js_name = displayBlock)]
     pub fn display_block(&self, sheet: usize, row: u32, col: u32, rows: u32, cols: u32) -> Vec<String> {

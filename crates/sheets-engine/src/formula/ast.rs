@@ -21,6 +21,8 @@ pub enum Expr {
     Call(String, Vec<Expr>),
     /// The formula failed to parse; evaluates to this error.
     Error(ErrorKind),
+    /// An omitted function argument (`SORT(A1:A9,,-1)`); evaluates to empty.
+    Missing,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,7 +49,7 @@ pub enum BinOp {
 
 /// Functions whose result can change without any of their inputs changing.
 /// Like Excel, cells using them are recalculated on every recalculation.
-pub const VOLATILE_FUNCTIONS: &[&str] = &["INDIRECT", "NOW", "OFFSET", "RAND", "RANDBETWEEN", "TODAY"];
+pub const VOLATILE_FUNCTIONS: &[&str] = &["INDIRECT", "NOW", "OFFSET", "RAND", "RANDARRAY", "RANDBETWEEN", "TODAY"];
 
 impl Expr {
     /// Every cell/range on the formula's own sheet this expression reads.

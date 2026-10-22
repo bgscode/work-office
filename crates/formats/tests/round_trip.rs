@@ -40,6 +40,8 @@ fn build() -> Workbook {
     }
     edits.push((at("D2"), "=B2-C2".into()));
     edits.push((at("E1"), "='Data 2025'!A1*2".into()));
+    // A dynamic array: spills B8:B11 (sorted sales).
+    edits.push((at("H8"), "=SORT(B2:B5,,-1)".into()));
     book.set_inputs(0, edits);
     book.set_inputs(1, vec![(at("A1"), "21".into())]);
 
@@ -137,6 +139,9 @@ fn everything_round_trips() {
         assert_eq!(a.sheet.value(at(cell)), b.sheet.value(at(cell)), "{cell}");
     }
     assert_eq!(b.sheet.value(at("E1")), &Value::Number(42.0));
+    // The spill comes back from the formula, not from cached values in the way.
+    assert_eq!(b.sheet.spill_range(at("H8")), a.sheet.spill_range(at("H8")));
+    assert_eq!(b.sheet.value(at("H11")), &Value::Number(90.0));
 
     // Formatting and sizes.
     assert_eq!(a.sheet.style(at("A1")), b.sheet.style(at("A1")));

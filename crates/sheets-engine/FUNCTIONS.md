@@ -248,11 +248,40 @@ Money paid out is negative, money received positive (Excel's convention). `type`
 | `QUARTILE.INC` | `QUARTILE.INC(array, quart)` |
 | `QUARTILE.EXC` | `QUARTILE.EXC(array, quart)` |
 
+## Dynamic arrays
+
+A formula whose result is several values **spills** into the cells below and to
+the right, like Excel 365. If any of those cells holds something, the formula
+shows `#SPILL!` until they are cleared. Operators work element by element
+(`=A2:A10*B2:B10`, `=B2:B10>100`), and one-value functions such as `UPPER`,
+`ROUND`, `LEFT`, `IF` and `TEXT` apply to each element of an array argument.
+`SUM(A2:A10*B2:B10)` and `SUM(FILTER(...))` work without Ctrl+Shift+Enter.
+
+| Function | Syntax | Notes |
+|---|---|---|
+| `FILTER` | `FILTER(array, include, [if_empty])` | `#CALC!` when nothing matches and no `if_empty` |
+| `SORT` | `SORT(array, [sort_index], [sort_order], [by_col])` | Blanks and errors last |
+| `SORTBY` | `SORTBY(array, by_array1, [sort_order1], ...)` | |
+| `UNIQUE` | `UNIQUE(array, [by_col], [exactly_once])` | Text compared without case |
+| `SEQUENCE` | `SEQUENCE(rows, [columns], [start], [step])` | |
+| `RANDARRAY` | `RANDARRAY([rows], [columns], [min], [max], [whole_number])` | Volatile |
+| `TRANSPOSE` | `TRANSPOSE(array)` | |
+| `TAKE` | `TAKE(array, rows, [columns])` | Negative counts from the end |
+| `DROP` | `DROP(array, rows, [columns])` | Negative counts from the end |
+| `CHOOSEROWS` | `CHOOSEROWS(array, row_num1, ...)` | |
+| `CHOOSECOLS` | `CHOOSECOLS(array, col_num1, ...)` | |
+| `VSTACK` | `VSTACK(array1, ...)` | Shorter rows padded with `#N/A` |
+| `HSTACK` | `HSTACK(array1, ...)` | |
+| `TOCOL` | `TOCOL(array, [ignore], [scan_by_column])` | ignore: 1 blanks, 2 errors, 3 both |
+| `TOROW` | `TOROW(array, [ignore], [scan_by_column])` | |
+| `EXPAND` | `EXPAND(array, rows, [columns], [pad_with])` | |
+| `TEXTSPLIT` | `TEXTSPLIT(text, col_delimiter, [row_delimiter], [ignore_empty])` | Delimiters may be arrays of several strings |
+| `XMATCH` | `XMATCH(lookup_value, lookup_array, [match_mode], [search_mode])` | match_mode 0, -1, 1, 2 (wildcards) |
+| `LET` | `LET(name1, value1, ..., calculation)` | Names may hold arrays |
+
 ## Not yet supported
 
-Financial functions (`PMT`, `NPV`…), more statistics (`PERCENTILE`,
-`QUARTILE`, `CORREL`…), `TIMEVALUE`, `SUMIFS`-style database functions
-(`DSUM`…), references as values (`OFFSET`, `INDIRECT`), automatic refresh of
-volatile functions, and array formulas / dynamic arrays (`FILTER`, `SORT`,
-`UNIQUE`, spilling results from `XLOOKUP`). Good first issues — see
+`LAMBDA` and its helpers (`MAP`, `REDUCE`, `BYROW`…), array constants
+(`{1,2;3,4}`), `TIMEVALUE`, database functions (`DSUM`…) and a few statistics
+(`CORREL`, `FORECAST`…). Good first issues — see
 [CONTRIBUTING.md](../../CONTRIBUTING.md).

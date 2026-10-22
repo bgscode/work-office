@@ -2265,3 +2265,7 @@ textarea.cell-editor {
 .format-cells .dialog-tab-body {
   min-height: 330px;
 }
+
+.formula-input textarea.ghost {
+  color: #a19f9d;
+}

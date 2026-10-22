@@ -14,6 +14,8 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Added
 
+- Dynamic arrays (Excel 365): formulas that return several values spill into the cells around them, with `#SPILL!` when something is in the way (it spills again once cleared); spilled cells show their formula greyed in the formula bar and the area is outlined. Operators and functions like `IF`, `UPPER`, `ROUND` work element by element (`=A2:A10*B2:B10`, `=SUM(A2:A10*B2:B10)`). New functions: `FILTER`, `SORT`, `SORTBY`, `UNIQUE`, `SEQUENCE`, `RANDARRAY`, `TRANSPOSE`, `TAKE`, `DROP`, `CHOOSEROWS`, `CHOOSECOLS`, `VSTACK`, `HSTACK`, `TOCOL`, `TOROW`, `EXPAND`, `TEXTSPLIT`, `XMATCH`, `LET`; omitted arguments (`SORT(A1:A9,,-1)`). Saved to .xlsx as array formulas with `_xlfn` names; Excel's dynamic arrays open correctly.
+
 - Number formats: every Excel format code now displays exactly as in Excel — sections (positive;negative;zero;text), colours (`[Red]`), conditions (`[>=1000]`), thousands scaling (`#,##0,"K"`), literals, dates and times (`dd-mmm-yyyy`, `dddd`, `h:mm AM/PM`, `[h]:mm:ss`, `.000`), fractions, scientific and accounting formats. Codes in .xlsx files are kept as they are instead of being simplified. Format Cells dialog (Ctrl+1, right-click, Number box → More Number Formats…) with Number (General, Number, Currency, Accounting, Date, Time, Percentage, Fraction, Scientific, Text, Custom with a live sample), Alignment, Font, Border and Fill tabs; one undo step.
 
 - Charts: double-click a chart title to edit it in place; Change Colors now recolours pie and doughnut slices (slice colours are saved in .xlsx).

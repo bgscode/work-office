@@ -269,7 +269,7 @@ pub fn lcm(args: &[Arg]) -> Result<Value, ErrorKind> {
 
 /// A number in [0, 1). Seeded from the clock plus a call counter and mixed
 /// with SplitMix64: fine for spreadsheets, not for cryptography.
-fn random_unit() -> f64 {
+pub(crate) fn random_unit() -> f64 {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     const GOLDEN: u64 = 0x9E37_79B9_7F4A_7C15;
     let count = COUNTER.fetch_add(1, AtomicOrdering::Relaxed);

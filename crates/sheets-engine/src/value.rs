@@ -16,6 +16,10 @@ pub enum ErrorKind {
     Circ,
     /// Formula could not be parsed (Google Sheets shows `#ERROR!` too).
     Parse,
+    /// A dynamic array can't spill: cells in the way aren't empty.
+    Spill,
+    /// A calculation produced an empty array (FILTER with no matches).
+    Calc,
 }
 
 impl ErrorKind {
@@ -29,6 +33,8 @@ impl ErrorKind {
             ErrorKind::NA => "#N/A",
             ErrorKind::Circ => "#CIRC!",
             ErrorKind::Parse => "#ERROR!",
+            ErrorKind::Spill => "#SPILL!",
+            ErrorKind::Calc => "#CALC!",
         }
     }
 
@@ -42,6 +48,8 @@ impl ErrorKind {
             "#N/A" => ErrorKind::NA,
             "#CIRC!" => ErrorKind::Circ,
             "#ERROR!" => ErrorKind::Parse,
+            "#SPILL!" => ErrorKind::Spill,
+            "#CALC!" => ErrorKind::Calc,
             _ => return None,
         })
     }

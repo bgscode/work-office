@@ -8,6 +8,8 @@ interface Props {
   nameBox: ReactNode;
   /** The active cell's stored input, shown when not editing. */
   input: string;
+  /** A spilled cell's formula (from the cell it spills from), shown greyed like Excel. */
+  ghost?: string;
   editing: EditState | null;
   onStartEdit: () => void;
   onDraftChange: (draft: string, caret: number) => void;
@@ -22,7 +24,8 @@ interface Props {
 
 export function FormulaBar(props: Props) {
   const { inputRef, input, editing } = props;
-  const value = editing ? editing.draft : input;
+  const ghosted = !editing && !input && !!props.ghost;
+  const value = editing ? editing.draft : ghosted ? props.ghost! : input;
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.nativeEvent.isComposing || props.onEditorKey(e)) return;
@@ -69,6 +72,7 @@ export function FormulaBar(props: Props) {
           ref={inputRef}
           id={FORMULA_BAR_ID}
           aria-label="Formula"
+          className={ghosted ? "ghost" : undefined}
           spellCheck={false}
           autoComplete="off"
           rows={editing?.source === "bar" ? Math.min(6, value.split("\n").length) : 1}

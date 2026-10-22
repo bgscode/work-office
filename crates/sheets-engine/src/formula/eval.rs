@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
 
+use super::arrays;
 use super::ast::{BinOp, Expr, UnaryOp};
 use super::special;
 use crate::cell::{CellRef, Range, MAX_COLS, MAX_ROWS};
@@ -64,6 +65,8 @@ pub(crate) struct Ctx<'a> {
     pub at: Option<CellRef>,
     /// References produced by `OFFSET`/`INDIRECT`, so the caller can track them as dependencies.
     pub dynamic: RefCell<Vec<Reference>>,
+    /// Names bound by `LET`, innermost last (upper case).
+    pub lets: RefCell<Vec<(String, Arg)>>,
 }
 
 impl Ctx<'_> {
@@ -79,6 +82,12 @@ impl Ctx<'_> {
             },
             Some(_) => RangeValues { rows: 1, cols: 1, values: vec![Value::Error(ErrorKind::Ref)] },
         }
+    }
+
+    /// The value of a name: a `LET` variable.
+    pub fn name(&self, name: &str) -> Option<Arg> {
+        let upper = name.to_ascii_uppercase();
+        self.lets.borrow().iter().rev().find(|(n, _)| *n == upper).map(|(_, v)| v.clone())
     }
 
     pub fn value(&self, sheet: Option<&str>, at: CellRef) -> Value {
@@ -105,7 +114,7 @@ impl Ctx<'_> {
 
 /// Evaluate to a single value, with no current cell (`ROW()` without arguments is `#VALUE!`).
 pub fn eval(expr: &Expr, src: &dyn CellSource) -> Value {
-    let ctx = Ctx { src, at: None, dynamic: RefCell::new(Vec::new()) };
+    let ctx = Ctx { src, at: None, dynamic: RefCell::new(Vec::new()), lets: RefCell::new(Vec::new()) };
     eval_in(expr, &ctx)
 }
 
@@ -113,8 +122,16 @@ pub fn eval(expr: &Expr, src: &dyn CellSource) -> Value {
 /// `OFFSET`/`INDIRECT` resolved to, which the caller should treat as extra
 /// precedents of the cell.
 pub fn eval_at(expr: &Expr, src: &dyn CellSource, at: CellRef) -> (Value, Vec<Reference>) {
-    let ctx = Ctx { src, at: Some(at), dynamic: RefCell::new(Vec::new()) };
+    let ctx = Ctx { src, at: Some(at), dynamic: RefCell::new(Vec::new()), lets: RefCell::new(Vec::new()) };
     let value = eval_in(expr, &ctx);
+    (value, ctx.dynamic.into_inner())
+}
+
+/// Evaluate the formula in cell `at` as Excel 365 does: the result may be an
+/// array, which the sheet spills into the cells around `at`.
+pub fn eval_at_any(expr: &Expr, src: &dyn CellSource, at: CellRef) -> (Arg, Vec<Reference>) {
+    let ctx = Ctx { src, at: Some(at), dynamic: RefCell::new(Vec::new()), lets: RefCell::new(Vec::new()) };
+    let value = arrays::eval_any(expr, &ctx);
     (value, ctx.dynamic.into_inner())
 }
 
@@ -130,14 +147,21 @@ pub(crate) fn eval_in(expr: &Expr, ctx: &Ctx) -> Value {
             Some(Err(e)) => Value::Error(e),
             None => Value::Error(ErrorKind::Value),
         },
-        Expr::Name(_) => Value::Error(ErrorKind::Name),
-        Expr::Error(e) => Value::Error(*e),
-        Expr::Unary(op, e) => match (op, eval_in(e, ctx).as_number()) {
-            (_, Err(e)) => Value::Error(e),
-            (UnaryOp::Neg, Ok(n)) => Value::Number(-n),
-            (UnaryOp::Percent, Ok(n)) => Value::Number(n / 100.0),
+        Expr::Name(n) => match ctx.name(n) {
+            Some(Arg::Value(v)) => v,
+            Some(Arg::Range(r)) => r.values.into_iter().next().unwrap_or(Value::Empty),
+            None => Value::Error(ErrorKind::Name),
         },
+        Expr::Error(e) => Value::Error(*e),
+        Expr::Missing => Value::Empty,
+        Expr::Unary(op, e) => unary_value(*op, eval_in(e, ctx)),
         Expr::Binary(op, a, b) => binary(*op, eval_in(a, ctx), eval_in(b, ctx)),
+        // An array function where one value is expected gives its first value.
+        Expr::Call(name, args) if arrays::is_array_function(name) => match arrays::call(name, args, ctx) {
+            Ok(Arg::Value(v)) => v,
+            Ok(Arg::Range(r)) => r.values.into_iter().next().unwrap_or(Value::Empty),
+            Err(e) => Value::Error(e),
+        },
         Expr::Call(name, args) => call(name, args, ctx),
     }
 }
@@ -189,8 +213,23 @@ pub(crate) fn eval_arg(expr: &Expr, ctx: &Ctx) -> Arg {
             Some(Err(e)) => Arg::Value(Value::Error(e)),
             None => Arg::Value(call(name, args, ctx)),
         },
+        // Operators, names and array functions may give arrays: `SUM(A1:A9*B1:B9)`, `SUM(FILTER(...))`.
+        Expr::Binary(..) | Expr::Unary(..) | Expr::Name(_) => arrays::eval_any(expr, ctx),
+        Expr::Call(name, _) if arrays::is_array_function(name) => arrays::eval_any(expr, ctx),
         other => Arg::Value(eval_in(other, ctx)),
     }
+}
+
+pub(crate) fn unary_value(op: UnaryOp, v: Value) -> Value {
+    match (op, v.as_number()) {
+        (_, Err(e)) => Value::Error(e),
+        (UnaryOp::Neg, Ok(n)) => Value::Number(-n),
+        (UnaryOp::Percent, Ok(n)) => Value::Number(n / 100.0),
+    }
+}
+
+pub(crate) fn binary_values(op: BinOp, a: Value, b: Value) -> Value {
+    binary(op, a, b)
 }
 
 fn call(name: &str, args: &[Expr], ctx: &Ctx) -> Value {

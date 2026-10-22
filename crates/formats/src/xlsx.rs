@@ -29,7 +29,7 @@ use office_core::{OfficeError, Result};
 use sheets_engine::{
     Align, CellRef, ErrorKind, NumberFormat, Sheet, Style, VAlign, Value, Workbook, MAX_COLS, MAX_ROWS,
 };
-use sheets_engine::{BorderLine, BorderStyle, Borders, Side};
+use sheets_engine::{BorderLine, BorderStyle, Borders, Range, Side};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -47,8 +47,27 @@ const NS_MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main
 const NS_REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const NS_PKG_REL: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
 
+/// Dynamic array functions Excel writes as `_xlfn._xlws.NAME`.
+const WORKSHEET_FUNCTIONS: &[&str] = &["FILTER", "SORT"];
+
 /// Functions added after Excel 2007 must be written as `_xlfn.NAME` in files.
 const NEWER_FUNCTIONS: &[&str] = &[
+    "CHOOSECOLS",
+    "CHOOSEROWS",
+    "DROP",
+    "EXPAND",
+    "HSTACK",
+    "LET",
+    "RANDARRAY",
+    "SEQUENCE",
+    "SORTBY",
+    "TAKE",
+    "TEXTSPLIT",
+    "TOCOL",
+    "TOROW",
+    "UNIQUE",
+    "VSTACK",
+    "XMATCH",
     "AVERAGEIFS",
     "CONCAT",
     "COUNTIFS",
@@ -280,6 +299,7 @@ fn sheet_data(xml: &str, shared: &SharedStrings, dxfs: &[sheets_engine::conditio
     let mut tools = data_tools::ToolsReader::default();
     let (mut formula, mut value, mut inline) = (String::new(), String::new(), String::new());
     let mut at: Option<CellRef> = None;
+    let mut array_areas: Vec<Range> = Vec::new();
     let mut kind = Kind::Number;
     let mut inside = In::None;
     let (mut row, mut next_col) = (0u32, 0u32);
@@ -313,7 +333,20 @@ fn sheet_data(xml: &str, shared: &SharedStrings, dxfs: &[sheets_engine::conditio
                 return;
             }
             XmlEvent::Start { name: "v", .. } => inside = In::V,
-            XmlEvent::Start { name: "f", .. } => inside = In::F,
+            XmlEvent::Start { name: "f", attrs } => {
+                inside = In::F;
+                // A dynamic (or legacy) array formula: the cells it fills hold
+                // cached values we recalculate, so they aren't loaded.
+                if &*attr(attrs, "t") == "array" {
+                    if let (Some(cell), Some((a, b))) = (at, attr(attrs, "ref").split_once(':')) {
+                        if let (Some(a), Some(b)) = (CellRef::parse(a), CellRef::parse(b)) {
+                            if a == cell {
+                                array_areas.push(Range::new(a, b));
+                            }
+                        }
+                    }
+                }
+            }
             XmlEvent::Start { name: "t", .. } if kind == Kind::Inline => inside = In::InlineT,
             XmlEvent::End { name: "f" | "v" | "t" } => inside = In::None,
             XmlEvent::Text(t) => {
@@ -353,7 +386,8 @@ fn sheet_data(xml: &str, shared: &SharedStrings, dxfs: &[sheets_engine::conditio
                         ),
                     }
                 };
-                if let Some((input, typed)) = loaded {
+                let spilled = formula.is_empty() && array_areas.iter().any(|r| r.contains(cell) && r.start != cell);
+                if let Some((input, typed)) = loaded.filter(|_| !spilled) {
                     out.cells.push((cell, input, typed));
                 }
                 return;
@@ -914,6 +948,10 @@ fn worksheet_xml<'a>(sheet: &'a Sheet, styles: &mut StyleTable, strings: &mut Sh
         // Cells with content plus formatted empty cells, row by row.
         let mut p: Vec<CellRef> = sheet.cell_positions();
         p.extend(sheet.styled_cells().into_iter().map(|(at, _)| at));
+        // Spilled values are written too, as Excel does (their formula is in the top-left cell).
+        for (_, range) in sheet.spill_ranges() {
+            p.extend(range.cells());
+        }
         p.sort_unstable();
         p.dedup();
         p
@@ -937,7 +975,8 @@ fn worksheet_xml<'a>(sheet: &'a Sheet, styles: &mut StyleTable, strings: &mut Sh
             current_row = Some(at.row);
         }
         let s = styles.index(sheet.style(at));
-        write_cell(&mut xml, at, sheet.formula_input(at), sheet.value(at), s, strings);
+        let array = sheet.spill_range(at);
+        write_cell(&mut xml, at, sheet.formula_input(at), array, sheet.value(at), s, strings);
     }
     if current_row.is_some() {
         xml.push_str("</row>");
@@ -958,6 +997,8 @@ fn write_cell<'a>(
     xml: &mut String,
     at: CellRef,
     formula: Option<&str>,
+    // The area a dynamic array formula spills into: written as an array formula.
+    array: Option<sheets_engine::Range>,
     value: &'a Value,
     style: usize,
     strings: &mut SharedStringTable<'a>,
@@ -974,11 +1015,15 @@ fn write_cell<'a>(
     }
     if let Some(formula) = formula.and_then(|f| f.strip_prefix('=')) {
         xml.push_str(match value {
-            Value::Text(_) => " t=\"str\"><f>",
-            Value::Bool(_) => " t=\"b\"><f>",
-            Value::Error(_) => " t=\"e\"><f>",
-            _ => "><f>",
+            Value::Text(_) => " t=\"str\"><f",
+            Value::Bool(_) => " t=\"b\"><f",
+            Value::Error(_) => " t=\"e\"><f",
+            _ => "><f",
         });
+        if let Some(r) = array {
+            let _ = write!(xml, " t=\"array\" ref=\"{r}\"");
+        }
+        xml.push('>');
         escape_into(xml, &add_function_prefixes(formula));
         xml.push_str("</f>");
         match value {
@@ -1110,7 +1155,9 @@ fn add_function_prefixes(formula: &str) -> String {
             word.push(ch);
             continue;
         }
-        if ch == '(' && NEWER_FUNCTIONS.iter().any(|f| f.eq_ignore_ascii_case(&word)) {
+        if ch == '(' && WORKSHEET_FUNCTIONS.iter().any(|f| f.eq_ignore_ascii_case(&word)) {
+            out.push_str("_xlfn._xlws.");
+        } else if ch == '(' && NEWER_FUNCTIONS.iter().any(|f| f.eq_ignore_ascii_case(&word)) {
             out.push_str("_xlfn.");
         }
         out.push_str(&word);

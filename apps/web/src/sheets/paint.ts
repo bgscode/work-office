@@ -73,6 +73,8 @@ export interface PaintInput {
   filter: FilterInfo | null;
   /** Circle Invalid Data. */
   circles: { row: number; col: number }[];
+  /** The dynamic array the active cell belongs to: outlined in blue, like Excel. */
+  spill: Rect | null;
 }
 
 /** Size of an AutoFilter dropdown button. */
@@ -358,6 +360,13 @@ function paintOverlays(ctx: CanvasRenderingContext2D, p: PaintInput, pane: Pane)
     ctx.lineWidth = 2;
     ctx.strokeRect(px.x + 1, px.y + 1, px.w - 1, px.h - 1);
   });
+
+  if (p.spill) {
+    const px = rect(p.spill);
+    ctx.strokeStyle = "#4472c4";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px.x + 0.5, px.y + 0.5, px.w - 1, px.h - 1);
+  }
 
   // Circle Invalid Data: red ellipses around cells that break their rule.
   if (p.circles.length) {

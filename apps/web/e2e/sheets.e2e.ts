@@ -241,3 +241,40 @@ test("Format Cells: custom number formats", async ({ page }) => {
   await expect(page.locator(".dialog")).toHaveCount(0);
   await expectNoErrors(errors);
 });
+
+test("dynamic arrays spill like Excel 365", async ({ page }) => {
+  const { errors, cell } = await openWorkbook(page);
+  await clickCell(page, await cell(0, 0));
+  await typeRows(page, TABLE);
+  // SORT spills four sales figures down column E.
+  await clickCell(page, await cell(0, 4));
+  await page.keyboard.type("=SORT(B2:B5,,-1)");
+  await page.keyboard.press("Enter");
+  await clickCell(page, await cell(3, 4));
+  // A spilled cell shows the formula it comes from, greyed.
+  await expect(formulaBar(page)).toHaveValue("=SORT(B2:B5,,-1)");
+  await expect(formulaBar(page)).toHaveClass(/ghost/);
+  await clickCell(page, await cell(0, 4));
+  await page.keyboard.down("Shift");
+  await clickCell(page, await cell(3, 4));
+  await page.keyboard.up("Shift");
+  await expect(page.locator(".status-bar")).toContainText("Sum: 560");
+  // Something in the way: #SPILL!, cleared again when it's removed.
+  await clickCell(page, await cell(2, 4));
+  await page.keyboard.type("x");
+  await page.keyboard.press("Enter");
+  await clickCell(page, await cell(0, 6));
+  await page.keyboard.type("=E1");
+  await page.keyboard.press("Enter");
+  await clickCell(page, await cell(0, 6));
+  await page.keyboard.press("F2");
+  await page.keyboard.press("Escape");
+  await clickCell(page, await cell(2, 4));
+  await page.keyboard.press("Delete");
+  await clickCell(page, await cell(0, 7));
+  await page.keyboard.type("=FILTER(A2:A5, B2:B5>100)");
+  await page.keyboard.press("Enter");
+  await clickCell(page, await cell(1, 7));
+  await expect(formulaBar(page)).toHaveValue("=FILTER(A2:A5, B2:B5>100)");
+  await expectNoErrors(errors);
+});

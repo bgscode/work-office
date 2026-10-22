@@ -174,6 +174,10 @@ export function Grid(props: GridProps) {
   const logicalScroll = { top: scroll.top / zoom, left: scroll.left / zoom };
   const panes = makePanes(geo, logicalScroll, view);
   const showFillHandle = sel.bottom - sel.top < MAX_ROWS - 1 && sel.right - sel.left < MAX_COLS - 1 && !editing;
+  const spillRect = useMemo(() => {
+    const r = doc.spillRange(sheet, selection.anchor.row, selection.anchor.col);
+    return r.length === 4 ? { top: r[0], left: r[1], bottom: r[2], right: r[3] } : null;
+  }, [doc, sheet, revision, selection.anchor.row, selection.anchor.col]);
 
   useLayoutEffect(() => {
     const el = scrollerRef.current!;
@@ -205,8 +209,9 @@ export function Grid(props: GridProps) {
       showFillHandle,
       filter: props.filter,
       circles: props.circles,
+      spill: spillRect,
     });
-  }, [doc, sheet, revision, selection, scroll, size, zoom, geo, props.highlights, fillPreview, showFillHandle, props.filter, props.circles]);
+  }, [doc, sheet, revision, selection, scroll, size, zoom, geo, props.highlights, fillPreview, showFillHandle, props.filter, props.circles, spillRect]);
 
   // Scroll a cell (or its merged area) into view after the spacer has grown to include it.
   useLayoutEffect(() => {

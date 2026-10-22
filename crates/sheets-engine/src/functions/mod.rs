@@ -191,6 +191,22 @@ pub static FUNCTIONS: &[Function] = &[
         "CHOOSE(index, value1, [value2], ...)",
         "Picks a value from the list by position.",
     ),
+    f(
+        "CHOOSECOLS",
+        2,
+        ANY,
+        reference::special,
+        "CHOOSECOLS(array, col_num1, [col_num2], ...)",
+        "The chosen columns of an array.",
+    ),
+    f(
+        "CHOOSEROWS",
+        2,
+        ANY,
+        reference::special,
+        "CHOOSEROWS(array, row_num1, [row_num2], ...)",
+        "The chosen rows of an array.",
+    ),
     f("CLEAN", 1, Some(1), text::clean, "CLEAN(text)", "Removes non-printable characters."),
     f("CODE", 1, Some(1), text::code, "CODE(text)", "Numeric code of the first character."),
     f(
@@ -244,6 +260,14 @@ pub static FUNCTIONS: &[Function] = &[
         "DDB(cost, salvage, life, period, [factor])",
         "Depreciation by the double-declining balance method.",
     ),
+    f(
+        "DROP",
+        2,
+        Some(3),
+        reference::special,
+        "DROP(array, rows, [columns])",
+        "An array without its first (or last, if negative) rows or columns.",
+    ),
     f("EDATE", 2, Some(2), datetime::edate, "EDATE(start_date, months)", "Same day a number of months away."),
     f("EFFECT", 2, Some(2), financial::effect, "EFFECT(nominal_rate, npery)", "Effective annual interest rate."),
     f(
@@ -257,8 +281,24 @@ pub static FUNCTIONS: &[Function] = &[
     f("EVEN", 1, Some(1), math::even, "EVEN(number)", "Rounds away from zero to an even integer."),
     f("EXACT", 2, Some(2), text::exact, "EXACT(text1, text2)", "TRUE if two texts are identical, case-sensitive."),
     f("EXP", 1, Some(1), math::exp, "EXP(number)", "e raised to a power."),
+    f(
+        "EXPAND",
+        2,
+        Some(4),
+        reference::special,
+        "EXPAND(array, rows, [columns], [pad_with])",
+        "An array grown to the given size.",
+    ),
     f("FACT", 1, Some(1), math::fact, "FACT(number)", "Factorial of a number."),
     f("FALSE", 0, Some(0), logical::false_, "FALSE()", "The logical value FALSE."),
+    f(
+        "FILTER",
+        2,
+        Some(3),
+        reference::special,
+        "FILTER(array, include, [if_empty])",
+        "The rows (or columns) of an array that meet a condition. Spills.",
+    ),
     f(
         "FIND",
         2,
@@ -286,6 +326,7 @@ pub static FUNCTIONS: &[Function] = &[
         "Looks up a value in the first row of a table.",
     ),
     f("HOUR", 1, Some(1), datetime::hour, "HOUR(time)", "Hour of a time, 0 to 23."),
+    f("HSTACK", 1, ANY, reference::special, "HSTACK(array1, [array2], ...)", "Arrays placed side by side."),
     f(
         "IF",
         2,
@@ -337,6 +378,14 @@ pub static FUNCTIONS: &[Function] = &[
     f("LCM", 1, ANY, math::lcm, "LCM(number1, [number2], ...)", "Least common multiple."),
     f("LEFT", 1, Some(2), text::left, "LEFT(text, [count])", "First characters of a text."),
     f("LEN", 1, Some(1), text::len, "LEN(text)", "Number of characters in a text."),
+    f(
+        "LET",
+        3,
+        ANY,
+        reference::special,
+        "LET(name1, value1, [name2, value2, ...], calculation)",
+        "Names values for use in a calculation.",
+    ),
     f("LN", 1, Some(1), math::ln, "LN(number)", "Natural logarithm."),
     f("LOG", 1, Some(2), math::log, "LOG(number, [base])", "Logarithm to a base, 10 by default."),
     f("LOG10", 1, Some(1), math::log10, "LOG10(number)", "Base-10 logarithm."),
@@ -427,6 +476,14 @@ pub static FUNCTIONS: &[Function] = &[
     f("QUARTILE.EXC", 2, Some(2), stats::quartile_exc, "QUARTILE.EXC(array, quart)", "A quartile, excluding 0 and 1."),
     f("QUARTILE.INC", 2, Some(2), stats::quartile_inc, "QUARTILE.INC(array, quart)", "A quartile of values."),
     f("RAND", 0, Some(0), math::rand, "RAND()", "Random number from 0 up to 1."),
+    f(
+        "RANDARRAY",
+        0,
+        Some(5),
+        reference::special,
+        "RANDARRAY([rows], [columns], [min], [max], [whole_number])",
+        "An array of random numbers. Spills.",
+    ),
     f("RANDBETWEEN", 2, Some(2), math::randbetween, "RANDBETWEEN(bottom, top)", "Random integer between two numbers."),
     f("RANK", 2, Some(3), stats::rank, "RANK(number, ref, [order])", "Rank of a number in a list."),
     f("RANK.EQ", 2, Some(3), stats::rank, "RANK.EQ(number, ref, [order])", "Rank of a number in a list."),
@@ -455,9 +512,33 @@ pub static FUNCTIONS: &[Function] = &[
         "Position of text within text, ignoring case; supports wildcards.",
     ),
     f("SECOND", 1, Some(1), datetime::second, "SECOND(time)", "Second of a time, 0 to 59."),
+    f(
+        "SEQUENCE",
+        1,
+        Some(4),
+        reference::special,
+        "SEQUENCE(rows, [columns], [start], [step])",
+        "An array of sequential numbers. Spills.",
+    ),
     f("SIGN", 1, Some(1), math::sign, "SIGN(number)", "1, 0 or -1 depending on the sign."),
     f("SLN", 3, Some(3), financial::sln, "SLN(cost, salvage, life)", "Straight-line depreciation for one period."),
     f("SMALL", 2, Some(2), stats::small, "SMALL(data, k)", "The k-th smallest number."),
+    f(
+        "SORT",
+        1,
+        Some(4),
+        reference::special,
+        "SORT(array, [sort_index], [sort_order], [by_col])",
+        "An array sorted by one of its columns. Spills.",
+    ),
+    f(
+        "SORTBY",
+        2,
+        ANY,
+        reference::special,
+        "SORTBY(array, by_array1, [sort_order1], ...)",
+        "An array sorted by other arrays. Spills.",
+    ),
     f("SQRT", 1, Some(1), math::sqrt, "SQRT(number)", "Square root."),
     f("STDEV", 1, ANY, stats::stdev, "STDEV(number1, [number2], ...)", "Standard deviation of a sample."),
     f(
@@ -520,6 +601,14 @@ pub static FUNCTIONS: &[Function] = &[
         "Result for the first value equal to the expression.",
     ),
     f("T", 1, Some(1), text::t, "T(value)", "The value if it is text, otherwise empty text."),
+    f(
+        "TAKE",
+        2,
+        Some(3),
+        reference::special,
+        "TAKE(array, rows, [columns])",
+        "The first (or last, if negative) rows or columns of an array.",
+    ),
     f("TEXT", 2, Some(2), text::text, "TEXT(value, format)", "Formats a number as text using a format code."),
     f(
         "TEXTJOIN",
@@ -530,6 +619,14 @@ pub static FUNCTIONS: &[Function] = &[
         "Joins text with a delimiter.",
     ),
     f(
+        "TEXTSPLIT",
+        2,
+        Some(4),
+        reference::special,
+        "TEXTSPLIT(text, col_delimiter, [row_delimiter], [ignore_empty])",
+        "Text split into columns and rows. Spills.",
+    ),
+    f(
         "TIME",
         3,
         Some(3),
@@ -537,10 +634,28 @@ pub static FUNCTIONS: &[Function] = &[
         "TIME(hour, minute, second)",
         "Time serial number from hours, minutes and seconds.",
     ),
+    f("TOCOL", 1, Some(3), reference::special, "TOCOL(array, [ignore], [scan_by_column])", "An array as one column."),
     f("TODAY", 0, Some(0), datetime::today, "TODAY()", "Current date."),
+    f("TOROW", 1, Some(3), reference::special, "TOROW(array, [ignore], [scan_by_column])", "An array as one row."),
+    f(
+        "TRANSPOSE",
+        1,
+        Some(1),
+        reference::special,
+        "TRANSPOSE(array)",
+        "Rows turned into columns and columns into rows. Spills.",
+    ),
     f("TRIM", 1, Some(1), text::trim, "TRIM(text)", "Removes extra spaces."),
     f("TRUE", 0, Some(0), logical::true_, "TRUE()", "The logical value TRUE."),
     f("TRUNC", 1, Some(2), math::trunc, "TRUNC(number, [digits])", "Cuts off the fractional part."),
+    f(
+        "UNIQUE",
+        1,
+        Some(3),
+        reference::special,
+        "UNIQUE(array, [by_col], [exactly_once])",
+        "The distinct rows of an array. Spills.",
+    ),
     f("UPPER", 1, Some(1), text::upper, "UPPER(text)", "Converts text to upper case."),
     f("VALUE", 1, Some(1), text::value, "VALUE(text)", "Converts text to a number."),
     f("VAR", 1, ANY, stats::var, "VAR(number1, [number2], ...)", "Variance of a sample."),
@@ -555,6 +670,7 @@ pub static FUNCTIONS: &[Function] = &[
         "VLOOKUP(value, table, col_index, [approximate])",
         "Looks up a value in the first column of a table.",
     ),
+    f("VSTACK", 1, ANY, reference::special, "VSTACK(array1, [array2], ...)", "Arrays placed one below the other."),
     f("WEEKDAY", 1, Some(2), datetime::weekday, "WEEKDAY(date, [type])", "Day of the week as a number."),
     f("WEEKNUM", 1, Some(2), datetime::weeknum, "WEEKNUM(date, [type])", "Week number of the year."),
     f(
@@ -581,12 +697,25 @@ pub static FUNCTIONS: &[Function] = &[
         "XLOOKUP(lookup_value, lookup_array, return_array, [if_not_found], [match_mode], [search_mode])",
         "Finds a value and returns the matching item from another range.",
     ),
+    f(
+        "XMATCH",
+        2,
+        Some(4),
+        reference::special,
+        "XMATCH(lookup_value, lookup_array, [match_mode], [search_mode])",
+        "Position of a value in a row or column (exact, next smaller/larger or wildcard).",
+    ),
     f("XNPV", 3, Some(3), financial::xnpv, "XNPV(rate, values, dates)", "Net present value for irregular cash flows."),
     f("XOR", 1, ANY, logical::xor, "XOR(logical1, [logical2], ...)", "TRUE if an odd number of arguments are TRUE."),
     f("YEAR", 1, Some(1), datetime::year, "YEAR(date)", "Year of a date."),
 ];
 
 /// Find a function by its upper-case name.
+/// A number in [0, 1) (RAND, RANDARRAY).
+pub(crate) fn random() -> f64 {
+    math::random_unit()
+}
+
 pub fn lookup(name: &str) -> Option<&'static Function> {
     FUNCTIONS.binary_search_by(|f| f.name.cmp(name)).ok().map(|i| &FUNCTIONS[i])
 }

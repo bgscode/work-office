@@ -122,8 +122,7 @@ impl Workbook {
         {
             let s = &mut self.sheets[sheet].sheet;
             for (at, input) in edits {
-                s.write(at, input);
-                changed.push((sheet, at));
+                changed.extend(s.write_tracked(at, input).into_iter().map(|c| (sheet, c)));
             }
         }
         self.recalc(changed);
@@ -138,6 +137,10 @@ impl Workbook {
     /// Recalculate formulas that depend on `changed` (plus every link and volatile
     /// formula when `changed` is empty).
     fn recalc(&mut self, changed: Vec<Node>) {
+        self.recalc_round(changed, 0);
+    }
+
+    fn recalc_round(&mut self, changed: Vec<Node>, round: u32) {
         let links = self.link_index();
         let everything = changed.is_empty();
         if everything && links.is_empty() && self.sheets.iter().all(|ws| ws.sheet.volatiles().next().is_none()) {
@@ -191,10 +194,13 @@ impl Workbook {
             }
         }
         let mut ready: Vec<Node> = waiting.iter().filter(|(_, n)| **n == 0).map(|(k, _)| *k).collect();
+        let mut spilled: Vec<Node> = Vec::new();
         while let Some(n) = ready.pop() {
             waiting.remove(&n);
-            self.evaluate(n);
-            for d in deps(self, n) {
+            // Dependents as counted above, before evaluating may change this formula's spill.
+            let before = deps(self, n);
+            spilled.extend(self.evaluate(n).into_iter().map(|c| (n.0, c)));
+            for d in before {
                 if let Some(count) = waiting.get_mut(&d) {
                     *count -= 1;
                     if *count == 0 {
@@ -205,6 +211,10 @@ impl Workbook {
         }
         for (s, c) in waiting.into_keys() {
             self.sheets[s].sheet.store(c, Value::Error(ErrorKind::Circ));
+        }
+        // Spills that changed shape: recalculate what reads the cells they filled or left.
+        if !spilled.is_empty() && round < 8 {
+            self.recalc_round(spilled, round + 1);
         }
     }
 
@@ -223,12 +233,12 @@ impl Workbook {
         out
     }
 
-    fn evaluate(&mut self, (s, at): Node) {
-        let value = {
-            let Some(expr) = self.sheets[s].sheet.formula_expr(at) else { return };
-            formula::eval_at(expr, &BookSource { book: self, sheet: s }, at).0
+    fn evaluate(&mut self, (s, at): Node) -> Vec<CellRef> {
+        let result = {
+            let Some(expr) = self.sheets[s].sheet.formula_expr(at) else { return Vec::new() };
+            formula::eval_at_any(expr, &BookSource { book: self, sheet: s }, at).0
         };
-        self.sheets[s].sheet.store(at, value);
+        self.sheets[s].sheet.store_result(at, result)
     }
 }
 

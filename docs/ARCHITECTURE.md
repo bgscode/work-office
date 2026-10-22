@@ -78,6 +78,18 @@ exactly what prints, and the browser's "Save as PDF" gives PDF export. Page
 setup lives in the engine (`page_setup.rs`, `SetPageSetup` op) and is saved in
 `.xlsx` by `xlsx_page_setup.rs`.
 
+## Dynamic arrays
+
+`formula/arrays.rs` evaluates a formula to a value or an array (`eval_at_any`).
+An array result is stored by `Sheet::store_result`: the formula cell keeps the
+top-left value and the rest of the block is "spilled" — kept with the formula
+(`spills`), with each covered cell pointing at it (`spill_owner`) so
+`Sheet::value` reads it like any cell. A block that would overwrite data shows
+`#SPILL!` and is remembered (`spill_blocked`) so typing or clearing in it
+recalculates the formula. Formulas reading spilled cells count as dependents of
+the spilling formula; when a spill changes shape, its readers are recalculated in
+another round.
+
 ## Kinds of edits
 
 | Edit | Engine op | Undo |
