@@ -209,8 +209,8 @@ export function Grid(props: GridProps) {
     const p = makePanes(geo, { top: el.scrollTop / zoom, left: el.scrollLeft / zoom }, view);
     const viewH = el.clientHeight / zoom - HEADER_HEIGHT;
     const viewW = el.clientWidth / zoom - HEADER_WIDTH;
-    const top = Panes.revealOffset(rows, area.top, geo.freeze.rows, p.frozenHeight, el.scrollTop / zoom, viewH);
-    const left = Panes.revealOffset(cols, area.left, geo.freeze.cols, p.frozenWidth, el.scrollLeft / zoom, viewW);
+    const top = Panes.revealOffset(rows, area.top, geo.freeze.rows, p.frozenHeight, el.scrollTop / zoom, viewH, p.originY);
+    const left = Panes.revealOffset(cols, area.left, geo.freeze.cols, p.frozenWidth, el.scrollLeft / zoom, viewW, p.originX);
     if (top !== null) el.scrollTop = top * zoom;
     if (left !== null) el.scrollLeft = left * zoom;
   });
@@ -288,8 +288,8 @@ export function Grid(props: GridProps) {
   function onScroll() {
     const el = scrollerRef.current!;
     setScroll({ top: el.scrollTop, left: el.scrollLeft });
-    const contentH = (HEADER_HEIGHT + rows.y(rowCount)) * zoom;
-    const contentW = (HEADER_WIDTH + cols.x(colCount)) * zoom;
+    const contentH = (HEADER_HEIGHT + rows.y(rowCount) - panes.originY) * zoom;
+    const contentW = (HEADER_WIDTH + cols.x(colCount) - panes.originX) * zoom;
     if (el.scrollTop + 2 * el.clientHeight > contentH) setGrow((g) => ({ ...g, rows: rowCount + 1000 }));
     if (el.scrollLeft + 2 * el.clientWidth > contentW) setGrow((g) => ({ ...g, cols: colCount + 20 }));
   }
@@ -705,7 +705,8 @@ export function Grid(props: GridProps) {
         onDoubleClick={onDoubleClick}
         onContextMenu={onContextMenu}
       >
-        <div style={{ width: (HEADER_WIDTH + cols.x(colCount)) * zoom, height: (HEADER_HEIGHT + rows.y(rowCount)) * zoom }} />
+        {/* Lines before frozen panes' origin are out of view, so the scrollable size leaves them out. */}
+        <div style={{ width: (HEADER_WIDTH + cols.x(colCount) - panes.originX) * zoom, height: (HEADER_HEIGHT + rows.y(rowCount) - panes.originY) * zoom }} />
       </div>
       <div className="drawing-clip" style={{ width: Math.max(0, size.width), height: Math.max(0, size.height) }}>
         <DrawingLayer

@@ -68,5 +68,5 @@ export function buildGeometry(doc: SheetsDocument, sheet: number): SheetGeometry
   const merges = new MergeIndex(doc.merges(sheet));
   const rows = buildRows(doc, sheet, cols, merges);
   const f = doc.freezePanes(sheet);
-  return { rows, cols, merges, freeze: f.length === 2 ? { rows: f[0], cols: f[1] } : NO_FREEZE };
+  return { rows, cols, merges, freeze: f.length === 4 ? { rows: f[0], cols: f[1], top: f[2], left: f[3] } : NO_FREEZE };
 }

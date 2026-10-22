@@ -33,6 +33,8 @@ pub(super) struct LayoutReader {
     listed: Vec<u32>,
     merges: Vec<Range>,
     next_row: u32,
+    /// `<sheetView topLeftCell>`: where frozen panes start.
+    view_origin: CellRef,
 }
 
 impl Default for LayoutReader {
@@ -44,6 +46,7 @@ impl Default for LayoutReader {
             listed: Vec::new(),
             merges: Vec::new(),
             next_row: 0,
+            view_origin: CellRef::new(0, 0),
         }
     }
 }
@@ -88,10 +91,17 @@ impl LayoutReader {
                     }
                 }
             }
+            // The view's top-left cell is where the frozen rows/columns start.
+            "sheetView" => self.view_origin = CellRef::parse(&attr(attrs, "topLeftCell")).unwrap_or(CellRef::new(0, 0)),
             "pane" if matches!(&*attr(attrs, "state"), "frozen" | "frozenSplit") => {
                 let split = |key: &str| attr(attrs, key).parse::<f64>().map_or(0, |n| n.max(0.0) as u32);
-                let freeze =
-                    Freeze { rows: split("ySplit").min(MAX_ROWS - 1), cols: split("xSplit").min(MAX_COLS - 1) };
+                let (top, left) = (self.view_origin.row.min(MAX_ROWS - 1), self.view_origin.col.min(MAX_COLS - 1));
+                let freeze = Freeze {
+                    rows: split("ySplit").min(MAX_ROWS - 1 - top),
+                    cols: split("xSplit").min(MAX_COLS - 1 - left),
+                    top,
+                    left,
+                };
                 self.layout.freeze = (freeze.rows > 0 || freeze.cols > 0).then_some(freeze);
             }
             _ => {}
@@ -124,7 +134,8 @@ impl LayoutReader {
 /// `<sheetViews>` with the frozen pane, or "" when nothing is frozen.
 /// Goes right after `<worksheet>` (before `<sheetFormatPr>` and `<cols>`).
 pub(super) fn sheet_views_xml(sheet: &Sheet) -> String {
-    let Some(Freeze { rows, cols }) = sheet.layout().freeze else { return String::new() };
+    let Some(f) = sheet.layout().freeze else { return String::new() };
+    let (rows, cols) = (f.rows, f.cols);
     let pane = match (rows > 0, cols > 0) {
         (true, true) => "bottomRight",
         (true, false) => "bottomLeft",
@@ -132,9 +143,12 @@ pub(super) fn sheet_views_xml(sheet: &Sheet) -> String {
     };
     let x = if cols > 0 { format!(r#" xSplit="{cols}""#) } else { String::new() };
     let y = if rows > 0 { format!(r#" ySplit="{rows}""#) } else { String::new() };
-    let top_left = CellRef::new(rows, cols);
+    let (split_row, split_col) = f.split();
+    let top_left = CellRef::new(split_row, split_col);
+    let origin = CellRef::new(f.top, f.left);
+    let view_origin = if f.top > 0 || f.left > 0 { format!(r#" topLeftCell="{origin}""#) } else { String::new() };
     format!(
-        r#"<sheetViews><sheetView workbookViewId="0"><pane{x}{y} topLeftCell="{top_left}" activePane="{pane}" state="frozen"/><selection pane="{pane}" activeCell="{top_left}" sqref="{top_left}"/></sheetView></sheetViews>"#
+        r#"<sheetViews><sheetView workbookViewId="0"{view_origin}><pane{x}{y} topLeftCell="{top_left}" activePane="{pane}" state="frozen"/><selection pane="{pane}" activeCell="{top_left}" sqref="{top_left}"/></sheetView></sheetViews>"#
     )
 }
 

@@ -4,6 +4,10 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ## Unreleased
 
+### Fixed
+
+- Freeze Panes works like Excel when the sheet is scrolled: it freezes the rows and columns on screen instead of the first ones, so the grid no longer gets stuck when the frozen part is bigger than the window; scrolled frozen panes in Excel files (`<sheetView topLeftCell>`) open correctly.
+
 ### Added
 
 - Files & print (M6): File → Print (Ctrl+P) with a page preview and Excel's settings (active sheet, whole workbook or selection; orientation; paper size; margins; scaling) and Export PDF through the browser's "Save as PDF"; a Page Layout tab (Margins, Orientation, Size, Print Area, Print Titles, Scale to Fit, print gridlines/headings) and the Page Setup dialog (Page, Margins, Header/Footer, Sheet). Printouts keep formatting, conditional formatting, merged cells, charts and pictures, and repeat title rows/columns. Save (Ctrl+S) writes the .xlsx to a file on disk and later saves overwrite it; Save As (F12). Page setup is saved in .xlsx. Opening .csv/.tsv/.txt detects the delimiter. A round-trip test covers every feature .xlsx can hold.

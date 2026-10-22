@@ -117,16 +117,29 @@ impl SheetsDocument {
     }
 
     /// Frozen `[rows, cols]`, or empty when nothing is frozen.
+    /// Frozen panes as [first scrolling row, first scrolling column, first frozen row,
+    /// first frozen column], or empty when nothing is frozen (see `Freeze`).
     #[wasm_bindgen(js_name = freezePanes)]
     pub fn freeze_panes(&self, sheet: usize) -> Vec<u32> {
-        self.sheet(sheet).layout().freeze.map_or(Vec::new(), |f| vec![f.rows, f.cols])
+        self.sheet(sheet).layout().freeze.map_or(Vec::new(), |f| {
+            let (rows, cols) = f.split();
+            vec![rows, cols, f.top, f.left]
+        })
     }
 
-    /// Freeze the first `rows` rows and `cols` columns; (0, 0) unfreezes.
+    /// Freeze rows `top..rows` and columns `left..cols` (`rows`/`cols`: the first
+    /// line that scrolls; `top`/`left`: the first visible line when freezing).
     #[wasm_bindgen(js_name = setFreezePanes)]
-    pub fn set_freeze_panes(&mut self, sheet: usize, rows: u32, cols: u32) {
-        let freeze = Freeze { rows: rows.min(MAX_ROWS - 1), cols: cols.min(MAX_COLS - 1) };
-        self.apply(SetFreeze { sheet, freeze: (rows > 0 || cols > 0).then_some(freeze) });
+    pub fn set_freeze_panes(&mut self, sheet: usize, rows: u32, cols: u32, top: u32, left: u32) {
+        let top = if rows > top { top.min(MAX_ROWS - 1) } else { 0 };
+        let left = if cols > left { left.min(MAX_COLS - 1) } else { 0 };
+        let freeze = Freeze {
+            rows: rows.min(MAX_ROWS - 1).saturating_sub(top),
+            cols: cols.min(MAX_COLS - 1).saturating_sub(left),
+            top,
+            left,
+        };
+        self.apply(SetFreeze { sheet, freeze: (freeze.rows > 0 || freeze.cols > 0).then_some(freeze) });
     }
 }
 

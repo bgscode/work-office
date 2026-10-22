@@ -1199,7 +1199,7 @@ mod tests {
         l.hidden_rows.set(5, 5, Some(()));
         l.hidden_cols.set(2, 4, Some(()));
         l.set_merges([Range::new(CellRef::new(0, 0), CellRef::new(1, 2))]);
-        l.freeze = Some(Freeze { rows: 1, cols: 2 });
+        l.freeze = Some(Freeze::new(1, 2));
         let bytes = write(&book).unwrap();
         let sheet_xml = {
             let mut zip = ZipArchive::new(Cursor::new(&bytes[..])).unwrap();

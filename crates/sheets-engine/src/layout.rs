@@ -152,11 +152,50 @@ impl<T: Clone + PartialEq> Runs<T> {
     }
 }
 
-/// Frozen panes: the first `rows` rows and `cols` columns stay put while the rest scrolls.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Frozen panes: `rows` rows starting at `top` and `cols` columns starting at
+/// `left` stay put while the rest scrolls. Like Excel, freezing while scrolled
+/// freezes what is on screen: `top`/`left` is the first visible row/column
+/// then (`<sheetView topLeftCell>` in `.xlsx`), and lines before it stay out of
+/// view until the panes are unfrozen. Usually `top` and `left` are 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Freeze {
     pub rows: u32,
     pub cols: u32,
+    pub top: u32,
+    pub left: u32,
+}
+
+impl Freeze {
+    /// Freeze the first `rows` rows and `cols` columns.
+    pub fn new(rows: u32, cols: u32) -> Freeze {
+        Freeze { rows, cols, top: 0, left: 0 }
+    }
+
+    /// The first row and column that scroll.
+    pub fn split(&self) -> (u32, u32) {
+        (self.top + self.rows, self.left + self.cols)
+    }
+
+    /// (origin, count) along one axis.
+    fn axis(&self, rows: bool) -> (u32, u32) {
+        if rows {
+            (self.top, self.rows)
+        } else {
+            (self.left, self.cols)
+        }
+    }
+
+    fn with_axis(self, rows: bool, origin: u32, count: u32) -> Freeze {
+        if rows {
+            Freeze { top: origin, rows: count, ..self }
+        } else {
+            Freeze { left: origin, cols: count, ..self }
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.rows == 0 && self.cols == 0
+    }
 }
 
 /// How merged cells are created (Home → Merge & Center menu).
@@ -300,9 +339,16 @@ impl SheetLayout {
         });
         out.set_merges(merges.collect::<Vec<_>>());
         if let Some(f) = self.freeze {
-            let n = if rows { f.rows } else { f.cols };
-            let n = if at < n { fit(n.saturating_add(count)) } else { n };
-            out.freeze = Some(if rows { Freeze { rows: n, ..f } } else { Freeze { cols: n, ..f } });
+            // Lines inserted before the frozen block move it; inside it, they grow it.
+            let (origin, n) = f.axis(rows);
+            let (origin, n) = if at < origin {
+                (fit(origin.saturating_add(count)), n)
+            } else if at < origin + n {
+                (origin, fit(n.saturating_add(count)))
+            } else {
+                (origin, n)
+            };
+            out.freeze = Some(f.with_axis(rows, origin, n));
         }
         out
     }
@@ -348,13 +394,13 @@ impl SheetLayout {
         });
         out.set_merges(merges.collect::<Vec<_>>());
         if let Some(f) = self.freeze {
-            let n = if rows { f.rows } else { f.cols };
-            let removed = if at < n { n.min(end + 1) - at } else { 0 };
-            let n = n - removed;
-            out.freeze = Some(if rows { Freeze { rows: n, ..f } } else { Freeze { cols: n, ..f } });
-            if out.freeze.is_some_and(|f| f.rows == 0 && f.cols == 0) {
-                out.freeze = None;
-            }
+            let (origin, n) = f.axis(rows);
+            // Deleted lines before the frozen block move it up; inside it, they shrink it.
+            let overlap = |a: u32, b: u32| if at <= b && end >= a && b >= a { end.min(b) + 1 - at.max(a) } else { 0 };
+            let before = if origin == 0 { 0 } else { overlap(0, origin - 1) };
+            let inside = if n == 0 { 0 } else { overlap(origin, origin + n - 1) };
+            let next = f.with_axis(rows, origin - before, n - inside);
+            out.freeze = (!next.is_empty()).then_some(next);
         }
         out
     }
@@ -522,7 +568,7 @@ pub struct SetFreeze {
 impl Op<Workbook> for SetFreeze {
     fn apply(&self, doc: &mut Workbook) {
         if let Some(ws) = doc.sheets.get_mut(self.sheet) {
-            ws.sheet.layout_mut().freeze = self.freeze.filter(|f| f.rows > 0 || f.cols > 0);
+            ws.sheet.layout_mut().freeze = self.freeze.filter(|f| !f.is_empty());
         }
     }
 
@@ -604,11 +650,23 @@ mod tests {
     }
 
     #[test]
+    fn scrolled_freeze_follows_structure() {
+        // Rows 10-12 and column C frozen (frozen while scrolled to C11).
+        let l = SheetLayout { freeze: Some(Freeze { rows: 3, cols: 1, top: 10, left: 2 }), ..Default::default() };
+        let f = |l: SheetLayout| l.freeze.unwrap();
+        assert_eq!(f(l.inserted(true, 0, 2, 100)), Freeze { rows: 3, cols: 1, top: 12, left: 2 });
+        assert_eq!(f(l.inserted(true, 11, 2, 100)), Freeze { rows: 5, cols: 1, top: 10, left: 2 });
+        assert_eq!(f(l.deleted(true, 8, 4)), Freeze { rows: 1, cols: 1, top: 8, left: 2 });
+        assert_eq!(f(l.deleted(false, 0, 1)), Freeze { rows: 3, cols: 1, top: 10, left: 1 });
+        assert_eq!(l.freeze.unwrap().split(), (13, 3));
+    }
+
+    #[test]
     fn freeze_follows_structure() {
-        let l = SheetLayout { freeze: Some(Freeze { rows: 2, cols: 1 }), ..Default::default() };
-        assert_eq!(l.inserted(true, 0, 3, 100).freeze, Some(Freeze { rows: 5, cols: 1 }));
-        assert_eq!(l.inserted(true, 2, 3, 100).freeze, Some(Freeze { rows: 2, cols: 1 }));
-        assert_eq!(l.deleted(false, 0, 5).freeze, Some(Freeze { rows: 2, cols: 0 }));
+        let l = SheetLayout { freeze: Some(Freeze::new(2, 1)), ..Default::default() };
+        assert_eq!(l.inserted(true, 0, 3, 100).freeze, Some(Freeze::new(5, 1)));
+        assert_eq!(l.inserted(true, 2, 3, 100).freeze, Some(Freeze::new(2, 1)));
+        assert_eq!(l.deleted(false, 0, 5).freeze, Some(Freeze::new(2, 0)));
         assert_eq!(l.deleted(true, 0, 9).deleted(false, 0, 1).freeze, None);
     }
 
@@ -646,7 +704,7 @@ mod tests {
         h.apply(&mut wb, Box::new(SetRowHeights { sheet: 0, heights: vec![(3, 10, Some(60.0))] }));
         h.apply(&mut wb, Box::new(SetHidden { sheet: 0, rows: false, lines: vec![(1, 2, true)] }));
         h.apply(&mut wb, Box::new(SetMerges { sheet: 0, merges: vec![r("A1:B2")] }));
-        h.apply(&mut wb, Box::new(SetFreeze { sheet: 0, freeze: Some(Freeze { rows: 1, cols: 0 }) }));
+        h.apply(&mut wb, Box::new(SetFreeze { sheet: 0, freeze: Some(Freeze::new(1, 0)) }));
         let l = wb.sheets[0].sheet.layout();
         assert_eq!((l.row_height(2), l.row_height(3), l.row_height(11)), (40.0, 60.0, DEFAULT_ROW_HEIGHT));
         assert!(l.hidden_cols.contains(2));

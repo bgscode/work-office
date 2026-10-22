@@ -8,7 +8,7 @@ const geo = (cols = new ColumnLayout(), rows = new RowLayout()): SheetGeometry =
   cols,
   rows,
   merges: new MergeIndex([]),
-  freeze: { rows: 0, cols: 0 },
+  freeze: { rows: 0, cols: 0, top: 0, left: 0 },
 });
 
 describe("drawing anchors", () => {

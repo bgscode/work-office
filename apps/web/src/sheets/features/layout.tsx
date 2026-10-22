@@ -20,7 +20,8 @@ export interface LayoutContext {
   active: { row: number; col: number };
   merge: (kind: MergeKind) => void;
   unmerge: () => void;
-  setFreeze: (rows: number, cols: number) => void;
+  /** Freeze at the active cell, the top row, the first column, or unfreeze. */
+  setFreeze: (kind: "here" | "topRow" | "firstColumn" | "none") => void;
   setHidden: (axis: Axis, hidden: boolean) => void;
   openSizeDialog: (axis: Axis) => void;
   autofit: (axis: Axis) => void;
@@ -54,7 +55,6 @@ export function mergeCommand(ctx: LayoutContext): RibbonCommand {
 
 export function freezeCommand(ctx: LayoutContext): RibbonCommand {
   const frozen = ctx.freeze.rows > 0 || ctx.freeze.cols > 0;
-  const { row, col } = ctx.active;
   return {
     id: "freeze",
     label: "Freeze Panes",
@@ -64,10 +64,10 @@ export function freezeCommand(ctx: LayoutContext): RibbonCommand {
     group: "Window",
     menu: [
       frozen
-        ? { id: "unfreeze", label: "Unfreeze Panes", onRun: () => ctx.setFreeze(0, 0) }
-        : { id: "freeze-here", label: "Freeze Panes", onRun: () => ctx.setFreeze(row, col), disabled: row === 0 && col === 0 },
-      { id: "freeze-top", label: "Freeze Top Row", onRun: () => ctx.setFreeze(1, 0) },
-      { id: "freeze-first", label: "Freeze First Column", onRun: () => ctx.setFreeze(0, 1) },
+        ? { id: "unfreeze", label: "Unfreeze Panes", onRun: () => ctx.setFreeze("none") }
+        : { id: "freeze-here", label: "Freeze Panes", onRun: () => ctx.setFreeze("here") },
+      { id: "freeze-top", label: "Freeze Top Row", onRun: () => ctx.setFreeze("topRow") },
+      { id: "freeze-first", label: "Freeze First Column", onRun: () => ctx.setFreeze("firstColumn") },
     ],
   };
 }

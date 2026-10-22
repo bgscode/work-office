@@ -78,11 +78,15 @@ export function DrawingLayer(props: Props) {
 
   /** Sheet pixels to layer pixels (the layer starts below/right of the headers). */
   const toLayer = (r: Rect4): Rect4 => {
-    const frozenCols = geo.freeze.cols > 0 && r.x < geo.cols.x(geo.freeze.cols);
-    const frozenRows = geo.freeze.rows > 0 && r.y < geo.rows.y(geo.freeze.rows);
+    const f = geo.freeze;
+    const frozenCols = f.cols > 0 && r.x < geo.cols.x(f.cols);
+    const frozenRows = f.rows > 0 && r.y < geo.rows.y(f.rows);
+    // Panes frozen while scrolled start at their first frozen line.
+    const originX = f.cols > 0 ? geo.cols.x(f.left) : 0;
+    const originY = f.rows > 0 ? geo.rows.y(f.top) : 0;
     return {
-      x: (r.x - (frozenCols ? 0 : scroll.left)) * zoom,
-      y: (r.y - (frozenRows ? 0 : scroll.top)) * zoom,
+      x: (r.x - originX - (frozenCols ? 0 : scroll.left)) * zoom,
+      y: (r.y - originY - (frozenRows ? 0 : scroll.top)) * zoom,
       w: r.w * zoom,
       h: r.h * zoom,
     };

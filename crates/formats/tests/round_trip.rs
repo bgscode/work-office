@@ -69,7 +69,7 @@ fn build() -> Workbook {
     layout.set_row_height(6, 6, Some(40.0));
     layout.hidden_cols.set(7, 7, Some(()));
     layout.set_merges([range("F1:G2")]);
-    layout.freeze = Some(Freeze { rows: 1, cols: 1 });
+    layout.freeze = Some(Freeze { rows: 2, cols: 1, top: 5, left: 1 });
 
     let mut filter = AutoFilter::new(range("A1:C5"));
     filter
@@ -147,7 +147,7 @@ fn everything_round_trips() {
     assert_eq!(b.sheet.layout().row_height(6), 40.0);
     assert!(b.sheet.is_col_hidden(7));
     assert_eq!(b.sheet.layout().merges(), &[range("F1:G2")]);
-    assert_eq!(b.sheet.layout().freeze, Some(Freeze { rows: 1, cols: 1 }));
+    assert_eq!(b.sheet.layout().freeze, Some(Freeze { rows: 2, cols: 1, top: 5, left: 1 }));
 
     // Data tools: the filter keeps hiding Feb and Apr.
     assert_eq!(a.sheet.data_tools(), b.sheet.data_tools());

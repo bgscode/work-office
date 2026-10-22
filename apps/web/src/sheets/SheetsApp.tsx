@@ -709,9 +709,33 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       doc.unmergeCells(sheet, sel.top, sel.left, sel.bottom, sel.right);
       changed();
     },
-    setFreeze(rows: number, cols: number) {
-      doc.setFreezePanes(sheet, rows, cols);
+    setFreeze(kind) {
+      // Like Excel, freezing keeps what is on screen: the frozen panes start at
+      // the row and column at the top-left of the window, so nothing jumps.
+      const el = document.querySelector<HTMLElement>(".grid-scroller");
+      const f = geo.freeze;
+      // Where the window's top-left is in the sheet, ignoring any current freeze.
+      const absY = (f.rows > 0 ? geo.rows.y(f.top) : 0) + (el?.scrollTop ?? 0) / zoom;
+      const absX = (f.cols > 0 ? geo.cols.x(f.left) : 0) + (el?.scrollLeft ?? 0) / zoom;
+      const top = geo.rows.rowAt(absY);
+      const left = geo.cols.colAt(absX);
+      let rows = 0;
+      let cols = 0;
+      if (kind === "here") {
+        rows = row > top ? row : 0;
+        cols = col > left ? col : 0;
+        if (!rows && !cols) return;
+      } else if (kind === "topRow") rows = top + 1;
+      else if (kind === "firstColumn") cols = left + 1;
+      doc.setFreezePanes(sheet, rows, cols, top, left);
       changed();
+      // Keep the same view: a frozen axis scrolls from just after the frozen lines,
+      // an unfrozen one from where the window was.
+      requestAnimationFrame(() => {
+        if (!el) return;
+        el.scrollTop = rows ? 0 : absY * zoom;
+        el.scrollLeft = cols ? 0 : absX * zoom;
+      });
     },
     setHidden(axis: Axis, hidden: boolean) {
       const [first, last] = lineSpanOf(axis);

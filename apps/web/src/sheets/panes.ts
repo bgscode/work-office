@@ -3,16 +3,24 @@
 // position here is in logical (unzoomed) viewport pixels, headers included.
 //
 // With nothing frozen there is one pane and this is plain scrolling.
+//
+// Like Excel, panes frozen while the sheet was scrolled start at the row and
+// column that were at the top-left then (`top`, `left`): the frozen strip
+// shows lines top..rows-1, and lines before `top` stay out of view.
 
 import { HEADER_HEIGHT, HEADER_WIDTH } from "./geometry";
 import type { AxisLayout, ColumnLayout, RowLayout } from "./layout";
 
 export interface Freeze {
+  /** First row / column that scrolls (0 = none frozen). */
   rows: number;
   cols: number;
+  /** First frozen row / column (the top-left when the panes were frozen). */
+  top: number;
+  left: number;
 }
 
-export const NO_FREEZE: Freeze = Object.freeze({ rows: 0, cols: 0 });
+export const NO_FREEZE: Freeze = Object.freeze({ rows: 0, cols: 0, top: 0, left: 0 });
 
 /** One strip of the viewport along an axis: the frozen part or the scrolling part. */
 export interface Band {
@@ -44,36 +52,42 @@ export class Panes {
     readonly scroll: { top: number; left: number },
     readonly view: { width: number; height: number },
   ) {
-    this.frozenWidth = cols.x(freeze.cols);
-    this.frozenHeight = rows.y(freeze.rows);
+    this.originX = freeze.cols > 0 ? cols.x(freeze.left) : 0;
+    this.originY = freeze.rows > 0 ? rows.y(freeze.top) : 0;
+    this.frozenWidth = cols.x(freeze.cols) - this.originX;
+    this.frozenHeight = rows.y(freeze.rows) - this.originY;
   }
+
+  /** Sheet position of the first frozen column / row: everything is drawn shifted by it. */
+  readonly originX: number;
+  readonly originY: number;
 
   /** Viewport x of a column's left edge. */
   colX(col: number): number {
-    return HEADER_WIDTH + this.cols.x(col) - (col < this.freeze.cols ? 0 : this.scroll.left);
+    return HEADER_WIDTH + this.cols.x(col) - this.originX - (col < this.freeze.cols ? 0 : this.scroll.left);
   }
 
   /** Viewport y of a row's top edge. */
   rowY(row: number): number {
-    return HEADER_HEIGHT + this.rows.y(row) - (row < this.freeze.rows ? 0 : this.scroll.top);
+    return HEADER_HEIGHT + this.rows.y(row) - this.originY - (row < this.freeze.rows ? 0 : this.scroll.top);
   }
 
   /** Column under viewport x (in whichever pane x falls). */
   colAt(x: number): number {
-    return lineAt(this.cols, x - HEADER_WIDTH, this.freeze.cols, this.frozenWidth, this.scroll.left);
+    return lineAt(this.cols, x - HEADER_WIDTH, this.freeze.cols, this.freeze.left, this.originX, this.frozenWidth, this.scroll.left);
   }
 
   /** Row under viewport y. */
   rowAt(y: number): number {
-    return lineAt(this.rows, y - HEADER_HEIGHT, this.freeze.rows, this.frozenHeight, this.scroll.top);
+    return lineAt(this.rows, y - HEADER_HEIGHT, this.freeze.rows, this.freeze.top, this.originY, this.frozenHeight, this.scroll.top);
   }
 
   colBands(): Band[] {
-    return bands(this.cols, HEADER_WIDTH, this.view.width, this.freeze.cols, this.frozenWidth, this.scroll.left);
+    return bands(this.cols, HEADER_WIDTH, this.view.width, this.freeze.cols, this.freeze.left, this.originX, this.frozenWidth, this.scroll.left);
   }
 
   rowBands(): Band[] {
-    return bands(this.rows, HEADER_HEIGHT, this.view.height, this.freeze.rows, this.frozenHeight, this.scroll.top);
+    return bands(this.rows, HEADER_HEIGHT, this.view.height, this.freeze.rows, this.freeze.top, this.originY, this.frozenHeight, this.scroll.top);
   }
 
   panes(): Pane[] {
@@ -86,9 +100,9 @@ export class Panes {
    * The scroll offset (logical px) that brings line `i` fully into view along
    * one axis, or null if it is already visible or frozen.
    */
-  static revealOffset(layout: AxisLayout, i: number, frozenLines: number, frozenSize: number, scroll: number, viewSize: number): number | null {
+  static revealOffset(layout: AxisLayout, i: number, frozenLines: number, frozenSize: number, scroll: number, viewSize: number, origin = 0): number | null {
     if (i < frozenLines) return null;
-    const start = layout.pos(i);
+    const start = layout.pos(i) - origin;
     const end = start + layout.size(i);
     if (start < scroll + frozenSize) return Math.max(0, start - frozenSize);
     if (end > scroll + viewSize) return Math.max(0, Math.min(start - frozenSize, end - viewSize));
@@ -96,22 +110,31 @@ export class Panes {
   }
 }
 
-function lineAt(layout: AxisLayout, local: number, frozenLines: number, frozenSize: number, scroll: number): number {
-  if (frozenLines > 0 && local < frozenSize) return Math.min(layout.indexAt(Math.max(0, local)), frozenLines - 1);
-  const i = layout.indexAt(local + scroll);
+function lineAt(layout: AxisLayout, local: number, frozenLines: number, first: number, origin: number, frozenSize: number, scroll: number): number {
+  if (frozenLines > 0 && local < frozenSize) return Math.max(first, Math.min(layout.indexAt(Math.max(0, local) + origin), frozenLines - 1));
+  const i = layout.indexAt(local + scroll + origin);
   return frozenLines > 0 ? Math.max(i, layout.nextVisible(frozenLines, 1) ?? frozenLines) : i;
 }
 
-function bands(layout: AxisLayout, header: number, viewEnd: number, frozenLines: number, frozenSize: number, scroll: number): Band[] {
+function bands(
+  layout: AxisLayout,
+  header: number,
+  viewEnd: number,
+  frozenLines: number,
+  first: number,
+  origin: number,
+  frozenSize: number,
+  scroll: number,
+): Band[] {
   const out: Band[] = [];
   const split = Math.min(viewEnd, header + frozenSize);
   if (frozenLines > 0 && frozenSize > 0) {
-    out.push({ from: header, to: split, offset: 0, first: 0, last: frozenLines - 1 });
+    out.push({ from: header, to: split, offset: origin, first, last: frozenLines - 1 });
   }
   if (split < viewEnd) {
-    const first = Math.max(frozenLines, layout.indexAt(frozenSize + scroll));
-    const last = Math.max(first, layout.indexAt(scroll + viewEnd - header));
-    out.push({ from: split, to: viewEnd, offset: scroll, first, last: Math.min(last + 1, layout.count - 1) });
+    const firstScrolling = Math.max(frozenLines, layout.indexAt(frozenSize + scroll + origin));
+    const last = Math.max(firstScrolling, layout.indexAt(scroll + origin + viewEnd - header));
+    out.push({ from: split, to: viewEnd, offset: scroll + origin, first: firstScrolling, last: Math.min(last + 1, layout.count - 1) });
   }
   return out;
 }
