@@ -11,6 +11,7 @@ use sheets_engine::chart::{
     self, Anchor, AnchorPoint, AxisView, ChartPatch, ChartType, DataRef, DrawingContent, Image, LegendPos, SeriesName,
     SetDrawings,
 };
+use sheets_engine::shape::{self, Shape};
 use sheets_engine::{CellRef, Range};
 use wasm_bindgen::prelude::*;
 
@@ -106,6 +107,26 @@ impl SheetsDocument {
                 DrawingContent::Picture(img) => {
                     format!(r#"{{{head},"kind":"picture","mime":{},"bytes":{}}}"#, js(&img.mime), img.data.len())
                 }
+                DrawingContent::Shape(sh) => format!(
+                    concat!(
+                        r#"{{{},"kind":"shape","shape":{{"preset":{},"fill":{},"line":{},"lineWidth":{},"arrowEnd":{},"#,
+                        r#""flipV":{},"text":{},"textColor":{},"fontSize":{},"bold":{},"italic":{},"align":{},"textTop":{}}}}}"#
+                    ),
+                    head,
+                    js(&sh.preset),
+                    opt(&sh.fill),
+                    opt(&sh.line),
+                    num(sh.line_width),
+                    sh.arrow_end,
+                    sh.flip_v,
+                    js(&sh.text),
+                    js(&sh.text_color),
+                    num(sh.font_size),
+                    sh.bold,
+                    sh.italic,
+                    js(sh.align.id()),
+                    sh.text_top
+                ),
                 DrawingContent::Chart(c) => {
                     let series = list(c.series.iter().map(|s| {
                         let name = match &s.name {
@@ -228,6 +249,46 @@ impl SheetsDocument {
         let id = drawings.push(name, anchor, DrawingContent::Picture(image));
         self.set_drawings(sheet, drawings);
         Ok(id)
+    }
+
+    /// Insert a shape (`preset`: a DrawingML preset from `SHAPE_PRESETS`, or
+    /// "textBox") at `anchor`. Returns its id. `flip_v`: a line drawn from
+    /// bottom-left to top-right.
+    #[wasm_bindgen(js_name = insertShape)]
+    pub fn insert_shape(&mut self, sheet: usize, preset: &str, anchor: Vec<f64>, flip_v: bool) -> Result<u32, JsError> {
+        let shape = match preset {
+            "textBox" => Shape::text_box(),
+            p if shape::is_known_preset(p) => Shape { flip_v, ..Shape::new(p) },
+            p => return Err(JsError::new(&format!("unknown shape {p}"))),
+        };
+        let anchor = anchor_from(&anchor).ok_or_else(|| JsError::new("bad anchor"))?;
+        let mut drawings = self.sheet(sheet).drawings().clone();
+        let name = drawings.default_name(if preset == "textBox" { "TextBox" } else { "Shape" });
+        let id = drawings.push(name, anchor, DrawingContent::Shape(Box::new(shape)));
+        self.set_drawings(sheet, drawings);
+        Ok(id)
+    }
+
+    /// One Shape Format change (see `Shape::patched` for keys). Returns false
+    /// when nothing changed or the value was not accepted.
+    #[wasm_bindgen(js_name = formatShape)]
+    pub fn format_shape(&mut self, sheet: usize, id: u32, key: &str, value: &str) -> bool {
+        let mut drawings = self.sheet(sheet).drawings().clone();
+        let Some(d) = drawings.get_mut(id) else { return false };
+        let DrawingContent::Shape(sh) = &d.content else { return false };
+        let Some(next) = sh.patched(key, value) else { return false };
+        if **sh == next {
+            return false;
+        }
+        d.content = DrawingContent::Shape(Box::new(next));
+        self.set_drawings(sheet, drawings);
+        true
+    }
+
+    /// The Shapes gallery: `[group, preset, label, group, preset, label, ...]`.
+    #[wasm_bindgen(js_name = shapePresets)]
+    pub fn shape_presets() -> Vec<String> {
+        shape::SHAPE_PRESETS.iter().flat_map(|(g, p, l)| [g.to_string(), p.to_string(), l.to_string()]).collect()
     }
 
     /// The bytes of a picture (empty if `id` is not a picture).

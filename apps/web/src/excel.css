@@ -2009,3 +2009,82 @@ textarea.cell-editor {
   width: 100%;
   accent-color: var(--xl-green);
 }
+
+/* ---------------------------------------------------------------- shapes */
+
+.draw-preview {
+  position: absolute;
+  z-index: 3;
+  border: 1px dashed #605e5c;
+  background: rgba(68, 114, 196, 0.08);
+  pointer-events: none;
+}
+
+.shape-text-editor {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 4.8px 9.6px;
+  border: 0;
+  outline: 1px dashed #605e5c;
+  background: transparent;
+  font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif;
+  line-height: 1.2;
+  resize: none;
+  overflow: hidden;
+  cursor: text;
+}
+
+.shapes-gallery {
+  position: fixed;
+  z-index: 70;
+  width: 320px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 6px 8px;
+  background: #fff;
+  border: 1px solid var(--xl-border-strong);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+}
+
+.shapes-gallery h4 {
+  margin: 6px 0 4px;
+  padding: 2px 4px;
+  background: var(--xl-chrome);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.shapes-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 28px);
+  gap: 2px;
+}
+
+.shapes-grid button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: none;
+}
+
+.shapes-grid button:hover {
+  border-color: var(--xl-green);
+  background: var(--xl-green-light);
+}
+
+.menu-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #c8c6c4;
+}
+
+.xl-select.shape-font-size {
+  width: 64px;
+}

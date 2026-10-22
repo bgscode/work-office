@@ -35,9 +35,32 @@ export interface ChartInfo {
   series: { name: string | null; values: string; categories: string | null; color: string | null }[];
 }
 
+/** A shape or text box (see crates/sheets-engine/src/shape.rs). */
+export interface ShapeInfo {
+  /** DrawingML preset geometry, e.g. "rect", "ellipse", "rightArrow", "line". */
+  preset: string;
+  fill: string | null;
+  line: string | null;
+  /** Points. */
+  lineWidth: number;
+  arrowEnd: boolean;
+  flipV: boolean;
+  text: string;
+  textColor: string;
+  /** Points. */
+  fontSize: number;
+  bold: boolean;
+  italic: boolean;
+  align: "left" | "center" | "right";
+  textTop: boolean;
+}
+
 export type DrawingInfo =
   | { id: number; name: string; anchor: AnchorArray; kind: "chart"; chart: ChartInfo }
-  | { id: number; name: string; anchor: AnchorArray; kind: "picture"; mime: string; bytes: number };
+  | { id: number; name: string; anchor: AnchorArray; kind: "picture"; mime: string; bytes: number }
+  | { id: number; name: string; anchor: AnchorArray; kind: "shape"; shape: ShapeInfo };
+
+export const isLineShape = (preset: string) => preset === "line" || preset === "straightConnector1";
 
 export interface AxisView {
   min: number;

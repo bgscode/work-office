@@ -73,7 +73,8 @@ import { WorkbookTitle, type SaveStatus } from "./WorkbookTitle";
 import { Icon } from "@office/ui";
 import { Select } from "./Select";
 import { ChartTitlesDialog, SelectDataDialog, chartDesignTab, insertChartCommands, type ChartContext, type ChartDialog } from "./features/charts";
-import { rectAnchor } from "./charts/DrawingLayer";
+import { rectAnchor, type Rect4 } from "./charts/DrawingLayer";
+import { ShapesGallery, insertShapeCommands, shapeFormatTab, type ShapeContext } from "./features/shapes";
 import type { AnchorArray, ChartTypeId, DrawingInfo } from "./charts/types";
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -154,6 +155,10 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
   const [selectedDrawing, setSelectedDrawing] = useState<number | null>(null);
   const [chartDialog, setChartDialog] = useState<ChartDialog | null>(null);
   const [showTab, setShowTab] = useState<{ id: string; seq: number } | null>(null);
+  // Shapes: the one being drawn (Insert → Shapes), the gallery, and text editing.
+  const [drawingTool, setDrawingTool] = useState<string | null>(null);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [editShapeText, setEditShapeText] = useState<{ id: number; seq: number } | null>(null);
   // Data tools: open dialog, filter dropdown, in-cell list, Circle Invalid Data, messages.
   const [dataDialog, setDataDialog] = useState<DataDialog | null>(null);
   const [filterMenu, setFilterMenu] = useState<{ col: number; x: number; y: number } | null>(null);
@@ -813,6 +818,40 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
   const drawings = useMemo(() => JSON.parse(doc.drawingsJson(sheet) || "[]") as DrawingInfo[], [doc, sheet, revision]);
   const selectedInfo = drawings.find((d) => d.id === selectedDrawing) ?? null;
   const selectedChart = selectedInfo?.kind === "chart" ? { id: selectedInfo.id, info: selectedInfo.chart } : null;
+  const selectedShape = selectedInfo?.kind === "shape" ? { id: selectedInfo.id, info: selectedInfo.shape } : null;
+
+  function drawShape(rect: Rect4, flipV: boolean) {
+    const tool = drawingTool;
+    setDrawingTool(null);
+    if (!tool) return;
+    const id = doc.insertShape(sheet, tool, Float64Array.from(rectAnchor(geo, rect)), flipV);
+    changed();
+    setSelectedDrawing(id);
+    setShowTab((t) => ({ id: "shape-format", seq: (t?.seq ?? 0) + 1 }));
+    // A new text box is ready for typing.
+    if (tool === "textBox") setEditShapeText((e) => ({ id, seq: (e?.seq ?? 0) + 1 }));
+  }
+
+  function formatShape(key: string, value: string) {
+    if (selectedDrawing !== null && doc.formatShape(sheet, selectedDrawing, key, value)) changed();
+  }
+
+  const shapeCtx: ShapeContext = {
+    shape: selectedShape,
+    startDrawing: (preset) => {
+      if (editing) commit(0, 0);
+      setSelectedDrawing(null);
+      setGalleryOpen(false);
+      setDrawingTool(preset);
+    },
+    openGallery: () => setGalleryOpen((o) => !o),
+    format: formatShape,
+    remove: () => selectedDrawing !== null && deleteDrawing(selectedDrawing),
+    reorder: (toFront) => {
+      if (selectedDrawing !== null && doc.reorderDrawing(sheet, selectedDrawing, toFront)) changed();
+    },
+    editText: () => selectedDrawing !== null && setEditShapeText((e) => ({ id: selectedDrawing, seq: (e?.seq ?? 0) + 1 })),
+  };
 
   /** A spot for a new drawing: right of `area` (or the active cell), kept near the visible part of the sheet. */
   function placeFor(area: Rect, w: number, h: number): AnchorArray {
@@ -903,6 +942,9 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       x,
       y,
       items: [
+        ...(d?.kind === "shape" && !["line", "straightConnector1"].includes(d.shape.preset)
+          ? [{ label: "Edit Text", onRun: () => setEditShapeText((e) => ({ id, seq: (e?.seq ?? 0) + 1 })) }]
+          : []),
         ...(d?.kind === "chart"
           ? [
               { label: "Select Data…", onRun: () => setChartDialog("selectData") },
@@ -911,7 +953,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
           : []),
         { label: "Bring to Front", icon: "bringFront", onRun: () => doc.reorderDrawing(sheet, id, true) && changed(), separatorBefore: d?.kind === "chart" },
         { label: "Send to Back", icon: "sendBack", onRun: () => doc.reorderDrawing(sheet, id, false) && changed() },
-        { label: d?.kind === "chart" ? "Delete Chart" : "Delete Picture", shortcut: "Del", icon: "trash", onRun: () => deleteDrawing(id), separatorBefore: true },
+        { label: d?.kind === "chart" ? "Delete Chart" : d?.kind === "shape" ? "Delete Shape" : "Delete Picture", shortcut: "Del", icon: "trash", onRun: () => deleteDrawing(id), separatorBefore: true },
       ],
     });
   }
@@ -1150,6 +1192,8 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       e.preventDefault();
       if (editing) commit(0, 0);
       void saveWorkbook(true);
+    } else if (e.key === "Escape" && drawingTool) {
+      setDrawingTool(null);
     } else if (e.key === "F3" && e.shiftKey && !insertFunctionOpen) {
       e.preventDefault();
       openInsertFunction();
@@ -1473,6 +1517,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       label: "Insert",
       commands: [
         ...insertChartCommands(chartCtx),
+        ...insertShapeCommands(shapeCtx),
         { id: "row-above", label: "Row above", title: "Insert rows above the selection.", icon: "insertRowAbove", size: "small", group: "Cells", onRun: () => insertLines("rows", false) },
         { id: "row-below", label: "Row below", title: "Insert rows below the selection.", icon: "insertRowBelow", size: "small", group: "Cells", onRun: () => insertLines("rows", true) },
         { id: "col-left", label: "Column left", title: "Insert columns left of the selection.", icon: "insertColumnLeft", size: "small", group: "Cells", onRun: () => insertLines("cols", false) },
@@ -1530,6 +1575,8 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
 
   const designTab = chartDesignTab(chartCtx);
   if (designTab) tabs.push({ ...designTab, contextual: true });
+  const shapeTab = shapeFormatTab(shapeCtx);
+  if (shapeTab) tabs.push({ ...shapeTab, contextual: true });
 
   function addSheet() {
     setSheet(doc.addSheet());
@@ -1626,6 +1673,12 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
           }}
           onDeleteDrawing={deleteDrawing}
           onDrawingMenu={drawingMenu}
+          drawingTool={drawingTool}
+          onDrawShape={drawShape}
+          onShapeText={(id, text) => {
+            if (doc.formatShape(sheet, id, "text", text)) changed();
+          }}
+          editShapeText={editShapeText}
           onEnterAfterTabs={() => {
             const start = tabStart.current;
             tabStart.current = null;
@@ -1703,6 +1756,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       )}
       {insertFunctionOpen && <InsertFunctionDialog onInsert={closeInsertFunction} onClose={() => closeInsertFunction(null)} />}
       {renderDataDialog()}
+      {galleryOpen && <ShapesGallery onPick={shapeCtx.startDrawing} onClose={() => setGalleryOpen(false)} />}
       {printOpen && (
         <PrintView
           doc={doc}

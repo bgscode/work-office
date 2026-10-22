@@ -28,6 +28,7 @@ pub mod layout;
 pub mod ops;
 pub mod page_setup;
 pub mod painter;
+pub mod shape;
 pub mod sheet;
 pub mod sort;
 pub mod style;

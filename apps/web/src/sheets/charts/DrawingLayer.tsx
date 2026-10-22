@@ -11,7 +11,8 @@ import type { SheetsDocument } from "@office/engine";
 import { HEADER_HEIGHT, HEADER_WIDTH } from "../geometry";
 import type { SheetGeometry } from "../paint";
 import { axisLengths, drawChart } from "./renderChart";
-import type { AnchorArray, ChartView, DrawingInfo } from "./types";
+import { drawShape } from "./renderShape";
+import { isLineShape, type AnchorArray, type ChartView, type DrawingInfo, type ShapeInfo } from "./types";
 
 export interface Rect4 {
   x: number;
@@ -61,6 +62,10 @@ interface Props {
   onWheel: (dx: number, dy: number) => void;
   /** Keys a drawing doesn't handle itself (undo, redo). */
   onKey: (e: ReactKeyboardEvent) => void;
+  /** New text typed into a shape or text box. */
+  onShapeText: (id: number, text: string) => void;
+  /** Start editing this shape's text (e.g. right after drawing a text box). */
+  editText: { id: number; seq: number } | null;
 }
 
 export function DrawingLayer(props: Props) {
@@ -69,6 +74,19 @@ export function DrawingLayer(props: Props) {
   // Live rectangle while moving or resizing (sheet pixels).
   const [drag, setDrag] = useState<{ id: number; rect: Rect4 } | null>(null);
   const layerRef = useRef<HTMLDivElement>(null);
+  // The shape whose text is being typed, and the text so far.
+  const [textEdit, setTextEdit] = useState<{ id: number; text: string } | null>(null);
+  useEffect(() => {
+    if (!props.editText) return;
+    const d = drawings.find((x) => x.id === props.editText!.id);
+    if (d?.kind === "shape") setTextEdit({ id: d.id, text: d.shape.text });
+  }, [props.editText?.seq]);
+  function finishText() {
+    if (!textEdit) return;
+    const d = drawings.find((x) => x.id === textEdit.id);
+    if (d?.kind === "shape" && d.shape.text !== textEdit.text) props.onShapeText(textEdit.id, textEdit.text);
+    setTextEdit(null);
+  }
   // A selected drawing has the keyboard (Delete, arrows, Esc), however it was selected.
   useEffect(() => {
     if (props.selected === null) return;
@@ -99,6 +117,8 @@ export function DrawingLayer(props: Props) {
     props.onSelect(d.id);
     (e.currentTarget as HTMLElement).closest<HTMLElement>(".drawing")?.focus({ preventScroll: true });
     const start = anchorRect(geo, d.anchor);
+    // A horizontal or vertical line has no height or width.
+    const min = d.kind === "shape" && isLineShape(d.shape.preset) ? 0 : MIN_SIZE;
     const ratio = start.w / Math.max(1, start.h);
     const x0 = e.clientX;
     const y0 = e.clientY;
@@ -113,14 +133,14 @@ export function DrawingLayer(props: Props) {
         rect = { ...start, x: Math.max(0, start.x + dx), y: Math.max(0, start.y + dy) };
       } else {
         let { x, y, w, h } = start;
-        if (handle.includes("e")) w = Math.max(MIN_SIZE, start.w + dx);
-        if (handle.includes("s")) h = Math.max(MIN_SIZE, start.h + dy);
+        if (handle.includes("e")) w = Math.max(min, start.w + dx);
+        if (handle.includes("s")) h = Math.max(min, start.h + dy);
         if (handle.includes("w")) {
-          w = Math.max(MIN_SIZE, start.w - dx);
+          w = Math.max(min, start.w - dx);
           x = start.x + start.w - w;
         }
         if (handle.includes("n")) {
-          h = Math.max(MIN_SIZE, start.h - dy);
+          h = Math.max(min, start.h - dy);
           y = start.y + start.h - h;
         }
         // Shift on a corner keeps the proportions.
@@ -145,7 +165,11 @@ export function DrawingLayer(props: Props) {
   }
 
   function onKeyDown(e: ReactKeyboardEvent, d: DrawingInfo) {
-    if (e.key === "Delete" || e.key === "Backspace") {
+    if (d.kind === "shape" && !isLineShape(d.shape.preset) && (e.key === "Enter" || e.key === "F2" || (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey))) {
+      // Typing on a selected shape edits its text, like Excel.
+      e.preventDefault();
+      setTextEdit({ id: d.id, text: e.key.length === 1 ? d.shape.text + e.key : d.shape.text });
+    } else if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
       props.onDelete(d.id);
     } else if (e.key === "Escape") {
@@ -166,8 +190,12 @@ export function DrawingLayer(props: Props) {
     <div ref={layerRef} className="drawing-layer" style={{ left: HEADER_WIDTH * zoom, top: HEADER_HEIGHT * zoom }} onWheel={(e) => props.onWheel(e.deltaX, e.deltaY)}>
       {drawings.map((d) => {
         const rect = drag?.id === d.id ? drag.rect : anchorRect(geo, d.anchor);
-        if (rect.w <= 0 || rect.h <= 0) return null;
-        const px = toLayer(rect);
+        const line = d.kind === "shape" && isLineShape(d.shape.preset);
+        if (line ? rect.w <= 0 && rect.h <= 0 : rect.w <= 0 || rect.h <= 0) return null;
+        // Lines get room around them to be seen and grabbed even when flat.
+        const pad = line ? 6 : 0;
+        const box = toLayer(rect);
+        const px = { x: box.x - pad, y: box.y - pad, w: box.w + 2 * pad, h: box.h + 2 * pad };
         const selected = props.selected === d.id;
         return (
           <div
@@ -184,15 +212,54 @@ export function DrawingLayer(props: Props) {
               props.onSelect(d.id);
               props.onContextMenu(d.id, e.clientX, e.clientY);
             }}
-            onKeyDown={(e) => onKeyDown(e, d)}
+            onKeyDown={(e) => textEdit?.id !== d.id && onKeyDown(e, d)}
+            onDoubleClick={() => d.kind === "shape" && !isLineShape(d.shape.preset) && setTextEdit({ id: d.id, text: d.shape.text })}
           >
             {d.kind === "chart" ? (
               <ChartCanvas doc={doc} sheet={sheet} id={d.id} revision={revision} width={rect.w} height={rect.h} zoom={zoom} />
+            ) : d.kind === "shape" ? (
+              <ShapeCanvas shape={textEdit?.id === d.id ? { ...d.shape, text: "" } : d.shape} width={rect.w} height={rect.h} zoom={zoom} pad={pad / zoom} />
             ) : (
               <Picture doc={doc} sheet={sheet} id={d.id} mime={d.mime} name={d.name} />
             )}
+            {textEdit?.id === d.id && d.kind === "shape" && (
+              <textarea
+                className="shape-text-editor"
+                autoFocus
+                aria-label="Shape text"
+                value={textEdit.text}
+                style={{
+                  color: d.shape.textColor,
+                  fontSize: d.shape.fontSize * (4 / 3) * zoom,
+                  fontWeight: d.shape.bold ? 700 : 400,
+                  fontStyle: d.shape.italic ? "italic" : "normal",
+                  textAlign: d.shape.align,
+                  paddingTop: d.shape.textTop ? 4.8 * zoom : Math.max(0, (rect.h * zoom) / 2 - d.shape.fontSize * 0.8 * zoom),
+                }}
+                onFocus={(e) => e.currentTarget.setSelectionRange(e.currentTarget.value.length, e.currentTarget.value.length)}
+                onChange={(e) => setTextEdit({ id: d.id, text: e.target.value })}
+                onMouseDown={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    finishText();
+                    layerRef.current?.querySelector<HTMLElement>(`[data-drawing="${d.id}"]`)?.focus();
+                  }
+                }}
+                onBlur={finishText}
+              />
+            )}
             {selected &&
-              HANDLES.map((h) => <span key={h} className={`drawing-handle ${h}`} onMouseDown={(e) => startDrag(e, d, h)} />)}
+              textEdit?.id !== d.id &&
+              (d.kind === "shape" && isLineShape(d.shape.preset) ? (d.shape.flipV ? (["sw", "ne"] as const) : (["nw", "se"] as const)) : HANDLES).map((h) => (
+                <span
+                  key={h}
+                  className={`drawing-handle ${h}`}
+                  style={line ? { left: pad + (h.includes("e") ? box.w : 0), top: pad + (h.includes("s") ? box.h : 0) } : undefined}
+                  onMouseDown={(e) => startDrag(e, d, h)}
+                />
+              ))}
           </div>
         );
       })}
@@ -220,6 +287,21 @@ function ChartCanvas({ doc, sheet, id, revision, width, height, zoom }: { doc: S
     ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, 0, 0);
     drawChart(ctx, view, width, height);
   }, [view, width, height, zoom]);
+  return <canvas ref={ref} className="drawing-canvas" />;
+}
+
+function ShapeCanvas({ shape, width, height, zoom, pad }: { shape: ShapeInfo; width: number; height: number; zoom: number; pad: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useLayoutEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round((width + 2 * pad) * zoom * dpr));
+    canvas.height = Math.max(1, Math.round((height + 2 * pad) * zoom * dpr));
+    const ctx = canvas.getContext("2d")!;
+    ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, pad * zoom * dpr, pad * zoom * dpr);
+    drawShape(ctx, shape, width, height);
+  }, [shape, width, height, zoom, pad]);
   return <canvas ref={ref} className="drawing-canvas" />;
 }
 

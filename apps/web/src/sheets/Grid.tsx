@@ -29,8 +29,8 @@ import { HEADER_HEIGHT, HEADER_WIDTH, MAX_COLS, MAX_ROWS, colName, selectionRect
 import { DEFAULT_ROW_HEIGHT } from "./layout";
 import { navigate } from "./merges";
 import type { FilterInfo } from "./features/dataTools";
-import { DrawingLayer } from "./charts/DrawingLayer";
-import type { AnchorArray } from "./charts/types";
+import { DrawingLayer, type Rect4 } from "./charts/DrawingLayer";
+import { isLineShape, type AnchorArray } from "./charts/types";
 import { FILL_HANDLE_SIZE, filterButtonBox, makePanes, paint, type SheetGeometry } from "./paint";
 import { Panes } from "./panes";
 import { FORMULA_BAR_ID, type EditState } from "./types";
@@ -117,6 +117,12 @@ export interface GridProps {
   onDrawingAnchor: (id: number, anchor: AnchorArray) => void;
   onDeleteDrawing: (id: number) => void;
   onDrawingMenu: (id: number, x: number, y: number) => void;
+  /** Insert → Shapes: the shape being drawn by dragging on the grid, or null. */
+  drawingTool: string | null;
+  /** A shape was drawn: its box in sheet pixels; `flipV` for lines going up. */
+  onDrawShape: (rect: Rect4, flipV: boolean) => void;
+  onShapeText: (id: number, text: string) => void;
+  editShapeText: { id: number; seq: number } | null;
 }
 
 type Hit =
@@ -143,6 +149,8 @@ export function Grid(props: GridProps) {
   const [grow, setGrow] = useState({ rows: 0, cols: 0 });
   const [resizing, setResizing] = useState<{ axis: "col" | "row"; index: number; size: number } | null>(null);
   const [fillPreview, setFillPreview] = useState<Rect | null>(null);
+  /** Rubber band while drawing a shape (viewport px, unzoomed). */
+  const [drawPreview, setDrawPreview] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const [cursor, setCursor] = useState("cell");
   const pendingReveal = useRef<Cell | null>(null);
   const editingInCell = editing?.source === "cell";
@@ -387,9 +395,58 @@ export function Grid(props: GridProps) {
     window.addEventListener("mouseup", up);
   }
 
+  /** Sheet pixels (from the top-left of A1) under a viewport point. */
+  function sheetPoint(x: number, y: number) {
+    const p = livePanes();
+    const col = Math.max(0, p.colAt(Math.max(x, HEADER_WIDTH)));
+    const row = Math.max(0, p.rowAt(Math.max(y, HEADER_HEIGHT)));
+    return { x: Math.max(0, cols.x(col) + (x - p.colX(col))), y: Math.max(0, rows.y(row) + (y - p.rowY(row))) };
+  }
+
+  /** Insert → Shapes: drag out the shape (Shift keeps it square); a click inserts it at Excel's default size. */
+  function drawShape(e: MouseEvent) {
+    const tool = props.drawingTool!;
+    const line = isLineShape(tool);
+    const startView = local(e);
+    const start = sheetPoint(startView.x, startView.y);
+    let end = start;
+    let endView = startView;
+    setDrawPreview({ x1: startView.x, y1: startView.y, x2: startView.x, y2: startView.y });
+    drag(
+      (ev) => {
+        endView = local(ev);
+        end = sheetPoint(endView.x, endView.y);
+        if (ev.shiftKey && !line) {
+          const size = Math.max(Math.abs(end.x - start.x), Math.abs(end.y - start.y));
+          end = { x: start.x + Math.sign(end.x - start.x || 1) * size, y: start.y + Math.sign(end.y - start.y || 1) * size };
+          endView = { x: startView.x + (end.x - start.x), y: startView.y + (end.y - start.y) };
+        }
+        setDrawPreview({ x1: startView.x, y1: startView.y, x2: endView.x, y2: endView.y });
+      },
+      () => {
+        setDrawPreview(null);
+        let w = end.x - start.x;
+        let h = end.y - start.y;
+        if (Math.abs(w) < 4 && Math.abs(h) < 4) {
+          // A click: Excel's 1" x 1" (a 1" line).
+          w = 96;
+          h = line ? 0 : 96;
+        }
+        const rect = { x: Math.min(start.x, start.x + w), y: Math.min(start.y, start.y + h), w: Math.abs(w), h: Math.abs(h) };
+        props.onDrawShape(rect, line && w * h < 0);
+      },
+    );
+  }
+
   function onMouseDown(e: MouseEvent) {
     if (props.selectedDrawing !== null) props.onSelectDrawing(null);
     if (e.button !== 0) return;
+    if (props.drawingTool) {
+      e.preventDefault();
+      if (editing) props.onCommit(0, 0);
+      drawShape(e);
+      return;
+    }
     const hit = hitTest(e);
     if (hit.onScrollbar) return;
     e.preventDefault();
@@ -698,7 +755,7 @@ export function Grid(props: GridProps) {
         className="grid-scroller"
         role="grid"
         aria-label="Spreadsheet"
-        style={{ cursor: props.pointMode && cursor === "cell" ? "copy" : cursor }}
+        style={{ cursor: props.drawingTool ? "crosshair" : props.pointMode && cursor === "cell" ? "copy" : cursor }}
         onScroll={onScroll}
         onMouseDown={onMouseDown}
         onMouseMove={onHover}
@@ -708,6 +765,17 @@ export function Grid(props: GridProps) {
         {/* Lines before frozen panes' origin are out of view, so the scrollable size leaves them out. */}
         <div style={{ width: (HEADER_WIDTH + cols.x(colCount) - panes.originX) * zoom, height: (HEADER_HEIGHT + rows.y(rowCount) - panes.originY) * zoom }} />
       </div>
+      {drawPreview && (
+        <div
+          className="draw-preview"
+          style={{
+            left: Math.min(drawPreview.x1, drawPreview.x2) * zoom,
+            top: Math.min(drawPreview.y1, drawPreview.y2) * zoom,
+            width: Math.abs(drawPreview.x2 - drawPreview.x1) * zoom,
+            height: Math.abs(drawPreview.y2 - drawPreview.y1) * zoom,
+          }}
+        />
+      )}
       <div className="drawing-clip" style={{ width: Math.max(0, size.width), height: Math.max(0, size.height) }}>
         <DrawingLayer
           doc={doc}
@@ -727,6 +795,8 @@ export function Grid(props: GridProps) {
             inputRef.current?.focus({ preventScroll: true });
           }}
           onContextMenu={props.onDrawingMenu}
+          onShapeText={props.onShapeText}
+          editText={props.editShapeText}
           onWheel={(dx, dy) => scrollerRef.current?.scrollBy(dx, dy)}
           onKey={(e) => {
             const mod = e.metaKey || e.ctrlKey;

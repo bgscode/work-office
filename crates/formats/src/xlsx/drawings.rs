@@ -20,8 +20,9 @@ use std::sync::Arc;
 use office_core::{OfficeError, Result};
 use sheets_engine::chart::{
     self, Anchor, AnchorPoint, Chart, ChartType, DataRef, Drawing, DrawingContent, Drawings, Grouping, Image,
-    LegendPos, Series, SeriesName, SheetLookup, EMU_PER_PX,
+    LegendPos, Series, SeriesName, SheetLookup, EMU_PER_PX, PALETTE,
 };
+use sheets_engine::shape::{is_line, Shape, TextAlign};
 use sheets_engine::{Sheet, Workbook};
 use zip::ZipArchive;
 
@@ -100,6 +101,13 @@ impl DrawingWriter {
                         r = NS_REL,
                         rid = rid
                     ));
+                }
+                DrawingContent::Shape(shape) => {
+                    let (cx, cy) = anchor_size_emu(&ws.sheet, &item.anchor);
+                    xml.push_str("<xdr:twoCellAnchor>");
+                    xml.push_str(&anchor_xml(&item.anchor));
+                    xml.push_str(&shape_xml(shape, shape_id, &name, cx, cy));
+                    xml.push_str("<xdr:clientData/></xdr:twoCellAnchor>");
                 }
                 DrawingContent::Picture(image) => {
                     self.images += 1;
@@ -215,6 +223,69 @@ fn insert_drawing_element(mut xml: String) -> String {
 
 fn emu(px: f64) -> i64 {
     (px * EMU_PER_PX).round() as i64
+}
+
+/// `#RRGGBB` -> `<a:solidFill>`, `None` -> `<a:noFill/>`.
+fn fill_xml(color: Option<&str>) -> String {
+    match color {
+        Some(c) => format!(r#"<a:solidFill><a:srgbClr val="{}"/></a:solidFill>"#, c.trim_start_matches('#')),
+        None => "<a:noFill/>".into(),
+    }
+}
+
+/// `<xdr:sp>` for a shape or text box (lines too: Excel opens them as shapes).
+fn shape_xml(s: &Shape, id: usize, name: &str, cx: i64, cy: i64) -> String {
+    let flip = if s.flip_v { r#" flipV="1""# } else { "" };
+    let text_box = if s.text_top && s.align == TextAlign::Left { r#" txBox="1""# } else { "" };
+    let mut ln = format!(r#"<a:ln w="{}">{}"#, (s.line_width * 12700.0).round() as i64, fill_xml(s.line.as_deref()));
+    if s.arrow_end {
+        ln.push_str(r#"<a:tailEnd type="triangle"/>"#);
+    }
+    ln.push_str("</a:ln>");
+    let mut xml = format!(
+        concat!(
+            r#"<xdr:sp macro="" textlink=""><xdr:nvSpPr><xdr:cNvPr id="{id}" name="{name}"/><xdr:cNvSpPr{tb}/></xdr:nvSpPr>"#,
+            r#"<xdr:spPr><a:xfrm{flip}><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>"#,
+            r#"<a:prstGeom prst="{prst}"><a:avLst/></a:prstGeom>{fill}{ln}</xdr:spPr>"#
+        ),
+        id = id,
+        name = name,
+        tb = text_box,
+        flip = flip,
+        cx = cx,
+        cy = cy,
+        prst = escape(&s.preset),
+        fill = fill_xml(s.fill.as_deref()),
+        ln = ln
+    );
+    if !is_line(&s.preset) {
+        let anchor = if s.text_top { "t" } else { "ctr" };
+        let algn = match s.align {
+            TextAlign::Left => "l",
+            TextAlign::Center => "ctr",
+            TextAlign::Right => "r",
+        };
+        let sz = (s.font_size * 100.0).round() as i64;
+        let b = if s.bold { r#" b="1""# } else { "" };
+        let i = if s.italic { r#" i="1""# } else { "" };
+        let color = s.text_color.trim_start_matches('#');
+        xml.push_str(&format!(r#"<xdr:txBody><a:bodyPr vertOverflow="clip" horzOverflow="clip" rtlCol="0" anchor="{anchor}"/><a:lstStyle/>"#));
+        for para in s.text.split('\n') {
+            xml.push_str(&format!(r#"<a:p><a:pPr algn="{algn}"/>"#));
+            if para.is_empty() {
+                xml.push_str(&format!(r#"<a:endParaRPr lang="en-US" sz="{sz}"/>"#));
+            } else {
+                xml.push_str(&format!(
+                    r#"<a:r><a:rPr lang="en-US" sz="{sz}"{b}{i}><a:solidFill><a:srgbClr val="{color}"/></a:solidFill></a:rPr><a:t>{}</a:t></a:r>"#,
+                    escape(para)
+                ));
+            }
+            xml.push_str("</a:p>");
+        }
+        xml.push_str("</xdr:txBody>");
+    }
+    xml.push_str("</xdr:sp>");
+    xml
 }
 
 fn anchor_xml(a: &Anchor) -> String {
@@ -624,6 +695,7 @@ pub(super) fn read_sheet_drawings(
                         None => continue,
                     }
                 }
+                Target::Shape(shape) => DrawingContent::Shape(shape.clone()),
                 Target::Picture(rid) => {
                     let Some(path) = drawing_rels.get(rid) else { continue };
                     let ext = path.rsplit('.').next().unwrap_or("");
@@ -640,7 +712,12 @@ pub(super) fn read_sheet_drawings(
         for (name, anchor, content) in items {
             let id = drawings.next_id();
             let name = if name.is_empty() {
-                let kind = if matches!(content, DrawingContent::Chart(_)) { "Chart" } else { "Picture" };
+                let kind = match &content {
+                    DrawingContent::Chart(_) => "Chart",
+                    DrawingContent::Picture(_) => "Picture",
+                    DrawingContent::Shape(s) if s.text_top => "TextBox",
+                    DrawingContent::Shape(_) => "Shape",
+                };
                 format!("{kind} {id}")
             } else {
                 name
@@ -655,6 +732,198 @@ pub(super) fn read_sheet_drawings(
 enum Target {
     Chart(String),
     Picture(String),
+    Shape(Box<Shape>),
+}
+
+/// Reads one `<xdr:sp>` / `<xdr:cxnSp>`: geometry, fill, outline and text.
+/// Colours given only through the shape's theme style default to Excel's
+/// Office theme, which is what `Shape::new` uses.
+struct ShapeReader {
+    shape: Shape,
+    in_sppr: bool,
+    in_ln: bool,
+    in_solid: bool,
+    in_rpr: bool,
+    in_t: bool,
+    style_ref: &'static str,
+    fill_set: bool,
+    line_set: bool,
+    text_color_set: bool,
+    align_set: bool,
+    size_set: bool,
+    paragraphs: Vec<String>,
+}
+
+fn scheme_color(name: &str) -> Option<String> {
+    Some(
+        match name {
+            "accent1" => PALETTE[0],
+            "accent2" => PALETTE[1],
+            "accent3" => PALETTE[2],
+            "accent4" => PALETTE[3],
+            "accent5" => PALETTE[4],
+            "accent6" => PALETTE[5],
+            "lt1" | "bg1" => "#FFFFFF",
+            "dk1" | "tx1" => "#000000",
+            "lt2" | "bg2" => "#E7E6E6",
+            "dk2" | "tx2" => "#44546A",
+            _ => return None,
+        }
+        .to_string(),
+    )
+}
+
+impl ShapeReader {
+    fn new() -> ShapeReader {
+        ShapeReader {
+            shape: Shape::new("rect"),
+            in_sppr: false,
+            in_ln: false,
+            in_solid: false,
+            in_rpr: false,
+            in_t: false,
+            style_ref: "",
+            fill_set: false,
+            line_set: false,
+            text_color_set: false,
+            align_set: false,
+            size_set: false,
+            paragraphs: Vec::new(),
+        }
+    }
+
+    fn color(&mut self, c: String) {
+        if self.in_rpr && self.in_solid {
+            self.shape.text_color = c;
+            self.text_color_set = true;
+        } else if self.in_ln && self.in_solid {
+            self.shape.line = Some(c);
+            self.line_set = true;
+        } else if self.in_sppr && self.in_solid && !self.fill_set {
+            self.shape.fill = Some(c);
+            self.fill_set = true;
+        } else {
+            match self.style_ref {
+                "fillRef" if !self.fill_set && !is_line(&self.shape.preset) => self.shape.fill = Some(c),
+                "lnRef" if !self.line_set => self.shape.line = Some(c),
+                "fontRef" if !self.text_color_set => self.shape.text_color = c,
+                _ => {}
+            }
+        }
+    }
+
+    fn event(&mut self, ev: &XmlEvent) {
+        match ev {
+            XmlEvent::Start { name: "cNvSpPr", attrs } if matches!(&*attr(attrs, "txBox"), "1" | "true") => {
+                let preset = std::mem::take(&mut self.shape.preset);
+                self.shape = Shape { preset, ..Shape::text_box() };
+            }
+            XmlEvent::Start { name: "spPr", .. } => self.in_sppr = true,
+            XmlEvent::End { name: "spPr" } => self.in_sppr = false,
+            XmlEvent::Start { name: "xfrm", attrs } if self.in_sppr => {
+                self.shape.flip_v = &*attr(attrs, "flipV") == "1"
+            }
+            XmlEvent::Start { name: "prstGeom", attrs } if self.in_sppr => {
+                let prst = attr(attrs, "prst").into_owned();
+                if is_line(&prst) && !is_line(&self.shape.preset) {
+                    let defaults = Shape::new(&prst);
+                    self.shape.fill = None;
+                    self.shape.line = defaults.line;
+                }
+                self.shape.preset = prst;
+            }
+            XmlEvent::Start { name: "ln", attrs } if self.in_sppr => {
+                self.in_ln = true;
+                if let Ok(w) = attr(attrs, "w").parse::<f64>() {
+                    self.shape.line_width = w / 12700.0;
+                }
+            }
+            XmlEvent::End { name: "ln" } => self.in_ln = false,
+            XmlEvent::Start { name: "noFill", .. } => {
+                if self.in_ln {
+                    self.shape.line = None;
+                    self.line_set = true;
+                } else if self.in_sppr {
+                    self.shape.fill = None;
+                    self.fill_set = true;
+                }
+            }
+            XmlEvent::Start { name: "solidFill" | "gradFill", .. } => self.in_solid = true,
+            XmlEvent::End { name: "solidFill" | "gradFill" } => self.in_solid = false,
+            XmlEvent::Start { name: "srgbClr", attrs } => {
+                let v = attr(attrs, "val");
+                if v.len() == 6 {
+                    self.color(format!("#{}", v.to_uppercase()));
+                }
+            }
+            XmlEvent::Start { name: "schemeClr", attrs } => {
+                if let Some(c) = scheme_color(&attr(attrs, "val")) {
+                    self.color(c);
+                }
+            }
+            XmlEvent::Start { name: r @ ("fillRef" | "lnRef" | "fontRef"), .. } => {
+                self.style_ref = match *r {
+                    "fillRef" => "fillRef",
+                    "lnRef" => "lnRef",
+                    _ => "fontRef",
+                }
+            }
+            XmlEvent::End { name: "fillRef" | "lnRef" | "fontRef" } => self.style_ref = "",
+            XmlEvent::Start { name: "tailEnd", attrs } if self.in_ln => {
+                self.shape.arrow_end = !matches!(&*attr(attrs, "type"), "" | "none")
+            }
+            XmlEvent::Start { name: "bodyPr", attrs } => {
+                let a = attr(attrs, "anchor");
+                if !a.is_empty() {
+                    self.shape.text_top = &*a == "t";
+                }
+            }
+            XmlEvent::Start { name: "pPr", attrs } if !self.align_set => {
+                if let Some(a) = match &*attr(attrs, "algn") {
+                    "l" => Some(TextAlign::Left),
+                    "ctr" => Some(TextAlign::Center),
+                    "r" => Some(TextAlign::Right),
+                    _ => None,
+                } {
+                    self.shape.align = a;
+                    self.align_set = true;
+                }
+            }
+            XmlEvent::Start { name: "p", .. } => self.paragraphs.push(String::new()),
+            XmlEvent::Start { name: "rPr" | "defRPr" | "endParaRPr", attrs } => {
+                self.in_rpr = true;
+                if !self.size_set {
+                    if let Ok(sz) = attr(attrs, "sz").parse::<f64>() {
+                        self.shape.font_size = sz / 100.0;
+                        self.size_set = true;
+                    }
+                }
+                if &*attr(attrs, "b") == "1" {
+                    self.shape.bold = true;
+                }
+                if &*attr(attrs, "i") == "1" {
+                    self.shape.italic = true;
+                }
+            }
+            XmlEvent::End { name: "rPr" | "defRPr" | "endParaRPr" } => self.in_rpr = false,
+            XmlEvent::Start { name: "t", .. } => self.in_t = true,
+            XmlEvent::End { name: "t" } => self.in_t = false,
+            XmlEvent::Text(t) if self.in_t => {
+                if let Some(p) = self.paragraphs.last_mut() {
+                    p.push_str(t);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn finish(mut self) -> Shape {
+        while self.paragraphs.last().is_some_and(String::is_empty) {
+            self.paragraphs.pop();
+        }
+        self.shape.text = self.paragraphs.join("\n");
+        self.shape
+    }
 }
 
 struct ParsedAnchor {
@@ -676,105 +945,126 @@ fn parse_anchors(xml: &str, sheet: &Sheet) -> Vec<ParsedAnchor> {
         name: String,
         chart: Option<String>,
         picture: Option<String>,
+        shape: Option<ShapeReader>,
+        shape_done: Option<Shape>,
     }
     let mut out = Vec::new();
     let mut cur: Option<Cur> = None;
     let mut corner = "";
     let mut field = "";
     let mut depth_in_group = 0;
-    walk(xml, |ev| match ev {
-        XmlEvent::Start { name: n @ ("twoCellAnchor" | "oneCellAnchor" | "absoluteAnchor"), .. } => {
-            cur = Some(Cur { kind: n.to_string(), ..Cur::default() });
-        }
-        XmlEvent::Start { name: "grpSp", .. } => depth_in_group += 1,
-        XmlEvent::End { name: "grpSp" } => depth_in_group -= 1,
-        XmlEvent::Start { name: n @ ("from" | "to"), .. } => corner = if *n == "from" { "from" } else { "to" },
-        XmlEvent::End { name: "from" | "to" } => corner = "",
-        XmlEvent::Start { name: n @ ("col" | "colOff" | "row" | "rowOff"), .. } if !corner.is_empty() => {
-            field = match *n {
-                "col" => "col",
-                "colOff" => "colOff",
-                "row" => "row",
-                _ => "rowOff",
+    walk(xml, |ev| {
+        // Inside a shape, its reader sees every event first.
+        if depth_in_group == 0 {
+            if let Some(r) = cur.as_mut().and_then(|c| c.shape.as_mut()) {
+                r.event(ev);
             }
         }
-        XmlEvent::End { name: "col" | "colOff" | "row" | "rowOff" } => field = "",
-        XmlEvent::Text(text) if !field.is_empty() => {
-            if let (Some(c), Ok(v)) = (cur.as_mut(), text.trim().parse::<f64>()) {
-                let slot = match field {
-                    "col" => 0,
-                    "colOff" => 1,
-                    "row" => 2,
-                    _ => 3,
-                };
-                if corner == "from" {
-                    c.from[slot] = v;
-                } else {
-                    c.to[slot] = v;
+        match ev {
+            XmlEvent::Start { name: "sp" | "cxnSp", .. } if depth_in_group == 0 => {
+                if let Some(c) = cur.as_mut() {
+                    c.shape = Some(ShapeReader::new());
                 }
             }
-        }
-        XmlEvent::Start { name: "pos", attrs } => {
-            if let Some(c) = cur.as_mut() {
-                c.pos = (attr(attrs, "x").parse().unwrap_or(0.0), attr(attrs, "y").parse().unwrap_or(0.0));
+            XmlEvent::End { name: "sp" | "cxnSp" } if depth_in_group == 0 => {
+                if let Some(c) = cur.as_mut() {
+                    c.shape_done = c.shape.take().map(ShapeReader::finish);
+                }
             }
-        }
-        XmlEvent::Start { name: "ext", attrs } if depth_in_group == 0 => {
-            if let Some(c) = cur.as_mut() {
-                if c.ext == (0.0, 0.0) {
-                    if let (Ok(cx), Ok(cy)) = (attr(attrs, "cx").parse::<f64>(), attr(attrs, "cy").parse::<f64>()) {
-                        c.ext = (cx, cy);
+            XmlEvent::Start { name: n @ ("twoCellAnchor" | "oneCellAnchor" | "absoluteAnchor"), .. } => {
+                cur = Some(Cur { kind: n.to_string(), ..Cur::default() });
+            }
+            XmlEvent::Start { name: "grpSp", .. } => depth_in_group += 1,
+            XmlEvent::End { name: "grpSp" } => depth_in_group -= 1,
+            XmlEvent::Start { name: n @ ("from" | "to"), .. } => corner = if *n == "from" { "from" } else { "to" },
+            XmlEvent::End { name: "from" | "to" } => corner = "",
+            XmlEvent::Start { name: n @ ("col" | "colOff" | "row" | "rowOff"), .. } if !corner.is_empty() => {
+                field = match *n {
+                    "col" => "col",
+                    "colOff" => "colOff",
+                    "row" => "row",
+                    _ => "rowOff",
+                }
+            }
+            XmlEvent::End { name: "col" | "colOff" | "row" | "rowOff" } => field = "",
+            XmlEvent::Text(text) if !field.is_empty() => {
+                if let (Some(c), Ok(v)) = (cur.as_mut(), text.trim().parse::<f64>()) {
+                    let slot = match field {
+                        "col" => 0,
+                        "colOff" => 1,
+                        "row" => 2,
+                        _ => 3,
+                    };
+                    if corner == "from" {
+                        c.from[slot] = v;
+                    } else {
+                        c.to[slot] = v;
                     }
                 }
             }
-        }
-        XmlEvent::Start { name: "cNvPr", attrs } => {
-            if let Some(c) = cur.as_mut() {
-                if c.name.is_empty() {
-                    c.name = attr(attrs, "name").to_string();
+            XmlEvent::Start { name: "pos", attrs } => {
+                if let Some(c) = cur.as_mut() {
+                    c.pos = (attr(attrs, "x").parse().unwrap_or(0.0), attr(attrs, "y").parse().unwrap_or(0.0));
                 }
             }
-        }
-        XmlEvent::Start { name: "chart", attrs } => {
-            if let Some(c) = cur.as_mut() {
-                c.chart = Some(attr(attrs, "id").to_string());
-            }
-        }
-        XmlEvent::Start { name: "blip", attrs } => {
-            if let Some(c) = cur.as_mut() {
-                c.picture = Some(attr(attrs, "embed").to_string());
-            }
-        }
-        XmlEvent::End { name: "twoCellAnchor" | "oneCellAnchor" | "absoluteAnchor" } => {
-            let Some(c) = cur.take() else { return };
-            // Grouped shapes and other objects are skipped.
-            if depth_in_group > 0 {
-                return;
-            }
-            let target = match (c.chart, c.picture) {
-                (Some(r), _) => Target::Chart(r),
-                (None, Some(r)) => Target::Picture(r),
-                _ => return,
-            };
-            let px = |e: f64| e / EMU_PER_PX;
-            let point = |v: [f64; 4]| AnchorPoint::new(v[2] as u32, v[0] as u32, px(v[3]), px(v[1]));
-            let anchor = match c.kind.as_str() {
-                "twoCellAnchor" => Anchor { from: point(c.from), to: point(c.to) },
-                "oneCellAnchor" => {
-                    let from = point(c.from);
-                    let to = point_at(sheet, from, px(c.ext.0), px(c.ext.1));
-                    Anchor { from, to }
+            XmlEvent::Start { name: "ext", attrs } if depth_in_group == 0 => {
+                if let Some(c) = cur.as_mut() {
+                    if c.ext == (0.0, 0.0) {
+                        if let (Ok(cx), Ok(cy)) = (attr(attrs, "cx").parse::<f64>(), attr(attrs, "cy").parse::<f64>()) {
+                            c.ext = (cx, cy);
+                        }
+                    }
                 }
-                _ => {
-                    let origin = AnchorPoint::new(0, 0, 0.0, 0.0);
-                    let from = point_at(sheet, origin, px(c.pos.0), px(c.pos.1));
-                    let to = point_at(sheet, from, px(c.ext.0), px(c.ext.1));
-                    Anchor { from, to }
+            }
+            XmlEvent::Start { name: "cNvPr", attrs } => {
+                if let Some(c) = cur.as_mut() {
+                    if c.name.is_empty() {
+                        c.name = attr(attrs, "name").to_string();
+                    }
                 }
-            };
-            out.push(ParsedAnchor { anchor, name: c.name, target });
+            }
+            XmlEvent::Start { name: "chart", attrs } => {
+                if let Some(c) = cur.as_mut() {
+                    c.chart = Some(attr(attrs, "id").to_string());
+                }
+            }
+            XmlEvent::Start { name: "blip", attrs } => {
+                if let Some(c) = cur.as_mut() {
+                    c.picture = Some(attr(attrs, "embed").to_string());
+                }
+            }
+            XmlEvent::End { name: "twoCellAnchor" | "oneCellAnchor" | "absoluteAnchor" } => {
+                let Some(c) = cur.take() else { return };
+                // Grouped shapes and other objects are skipped.
+                if depth_in_group > 0 {
+                    return;
+                }
+                let target = match (c.chart, c.picture, c.shape_done) {
+                    (Some(r), _, _) => Target::Chart(r),
+                    (None, Some(r), _) => Target::Picture(r),
+                    (None, None, Some(s)) => Target::Shape(Box::new(s)),
+                    _ => return,
+                };
+                let px = |e: f64| e / EMU_PER_PX;
+                let point = |v: [f64; 4]| AnchorPoint::new(v[2] as u32, v[0] as u32, px(v[3]), px(v[1]));
+                let anchor = match c.kind.as_str() {
+                    "twoCellAnchor" => Anchor { from: point(c.from), to: point(c.to) },
+                    "oneCellAnchor" => {
+                        let from = point(c.from);
+                        let to = point_at(sheet, from, px(c.ext.0), px(c.ext.1));
+                        Anchor { from, to }
+                    }
+                    _ => {
+                        let origin = AnchorPoint::new(0, 0, 0.0, 0.0);
+                        let from = point_at(sheet, origin, px(c.pos.0), px(c.pos.1));
+                        let to = point_at(sheet, from, px(c.ext.0), px(c.ext.1));
+                        Anchor { from, to }
+                    }
+                };
+                out.push(ParsedAnchor { anchor, name: c.name, target });
+            }
+            _ => {}
         }
-        _ => {}
     });
     out
 }
@@ -1190,6 +1480,42 @@ mod tests {
         assert!(!got.show_title);
         assert_eq!(got.legend, LegendPos::None);
         assert_eq!(got.title, None);
+    }
+
+    #[test]
+    fn round_trips_shapes() {
+        let mut book = table_book();
+        let s = &mut book.sheets[0].sheet;
+        let mut d = s.drawings().clone();
+        let at = |r: u32| Anchor { from: AnchorPoint::new(r, 1, 0.0, 0.0), to: AnchorPoint::new(r + 4, 4, 5.0, 10.0) };
+        let oval = Shape { text: "Total\nQ1 & Q2".into(), bold: true, font_size: 14.0, ..Shape::new("ellipse") };
+        let arrow =
+            Shape { flip_v: true, line: Some("#C00000".into()), line_width: 2.25, ..Shape::new("straightConnector1") };
+        let note = Shape { text: "Check <these>".into(), ..Shape::text_box() };
+        let star = Shape { fill: None, line: None, ..Shape::new("star5") };
+        for (i, sh) in [oval, arrow, note, star].into_iter().enumerate() {
+            d.push(format!("Shape {i}"), at(i as u32 * 5), DrawingContent::Shape(Box::new(sh)));
+        }
+        s.set_drawings(d);
+        let back = read(&write(&book).unwrap()).unwrap();
+        assert_eq!(back.sheets[0].sheet.drawings().items, book.sheets[0].sheet.drawings().items);
+    }
+
+    #[test]
+    fn reads_excel_shapes_with_theme_styles() {
+        // As Excel writes a default shape: colours come from <xdr:style>.
+        let xml = r#"<xdr:wsDr xmlns:xdr="x" xmlns:a="a"><xdr:twoCellAnchor><xdr:from><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>3</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>5</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>
+<xdr:sp macro="" textlink=""><xdr:nvSpPr><xdr:cNvPr id="2" name="Rectangle 1"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1" cy="1"/></a:xfrm><a:prstGeom prst="roundRect"><a:avLst/></a:prstGeom></xdr:spPr>
+<xdr:style><a:lnRef idx="2"><a:schemeClr val="accent2"><a:shade val="50000"/></a:schemeClr></a:lnRef><a:fillRef idx="1"><a:schemeClr val="accent2"/></a:fillRef><a:effectRef idx="0"><a:schemeClr val="accent1"/></a:effectRef><a:fontRef idx="minor"><a:schemeClr val="lt1"/></a:fontRef></xdr:style>
+<xdr:txBody><a:bodyPr rtlCol="0" anchor="ctr"/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400"/><a:t>Hello</a:t></a:r></a:p></xdr:txBody></xdr:sp><xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>"#;
+        let anchors = parse_anchors(xml, &Sheet::new());
+        let Target::Shape(s) = &anchors[0].target else { panic!("not a shape") };
+        assert_eq!(anchors[0].name, "Rectangle 1");
+        assert_eq!(
+            (s.preset.as_str(), s.fill.as_deref(), s.text.as_str(), s.font_size),
+            ("roundRect", Some("#ED7D31"), "Hello", 14.0)
+        );
+        assert_eq!(s.text_color, "#FFFFFF");
     }
 
     #[test]

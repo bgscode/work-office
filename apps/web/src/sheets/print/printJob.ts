@@ -7,6 +7,7 @@ import { parseStyle, type CellStyle, type SheetsDocument } from "@office/engine"
 import { fontFor } from "../cellRenderer";
 import { anchorRect } from "../charts/DrawingLayer";
 import { drawChart, axisLengths } from "../charts/renderChart";
+import { drawShape } from "../charts/renderShape";
 import type { ChartView, DrawingInfo } from "../charts/types";
 import { MAX_COLS, MAX_ROWS, type Rect } from "../geometry";
 import { buildGeometry } from "../sheetGeometry";
@@ -63,6 +64,18 @@ function bytesToDataUrl(bytes: Uint8Array, mime: string): string {
   return `data:${mime};base64,${btoa(bin)}`;
 }
 
+/** Draw at twice the resolution so printouts are sharp. */
+function canvasImage(w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void): string | null {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(2, Math.round(w * 2));
+  canvas.height = Math.max(2, Math.round(h * 2));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.scale(2, 2);
+  draw(ctx);
+  return canvas.toDataURL("image/png");
+}
+
 function chartImage(doc: SheetsDocument, sheet: number, id: number, w: number, h: number): string | null {
   const lengths = axisLengths(w, h);
   const json = doc.chartViewJson(sheet, id, lengths.value, lengths.x);
@@ -108,8 +121,13 @@ function sheetSource(doc: SheetsDocument, sheet: number, selection: Rect | null)
 
   const images: PrintImage[] = [];
   for (const { d, r } of placed) {
-    if (r.w <= 0 || r.h <= 0) continue;
-    const src = d.kind === "chart" ? chartImage(doc, sheet, d.id, r.w, r.h) : bytesToDataUrl(doc.pictureData(sheet, d.id), d.mime);
+    if (r.w <= 0 && r.h <= 0) continue;
+    const src =
+      d.kind === "chart"
+        ? chartImage(doc, sheet, d.id, r.w, r.h)
+        : d.kind === "shape"
+          ? canvasImage(r.w, r.h, (ctx) => drawShape(ctx, d.shape, r.w, r.h))
+          : bytesToDataUrl(doc.pictureData(sheet, d.id), d.mime);
     if (src) images.push({ src, ...r });
   }
 

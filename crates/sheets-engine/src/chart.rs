@@ -446,6 +446,8 @@ impl Image {
 pub enum DrawingContent {
     Chart(Box<Chart>),
     Picture(Image),
+    /// Insert → Shapes and Text Box (see `shape.rs`).
+    Shape(Box<crate::shape::Shape>),
 }
 
 /// One floating object.
@@ -463,7 +465,7 @@ impl Drawing {
     pub fn chart(&self) -> Option<&Chart> {
         match &self.content {
             DrawingContent::Chart(c) => Some(c),
-            DrawingContent::Picture(_) => None,
+            DrawingContent::Picture(_) | DrawingContent::Shape(_) => None,
         }
     }
 }

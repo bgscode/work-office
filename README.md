@@ -26,7 +26,7 @@ Opening the app shows a start page like Microsoft 365's: create a blank workbook
 - Paste Special: values only, formatting only, formulas only, transpose
 - Cell layout: borders, fonts, wrap text, merge & center, row heights, hide/unhide, freeze panes
 - Data tools: filter dropdowns, custom sort, remove duplicates, data validation (dropdown lists, limits, alerts), conditional formatting (highlight rules, data bars, colour scales)
-- Charts (column, bar, line, area, pie, doughnut, scatter) that update live with the data, and pictures; move, resize, titles, legend, data labels, colours
+- Charts (column, bar, line, area, pie, doughnut, scatter) that update live with the data, pictures, shapes and text boxes; move, resize, titles, legend, data labels, colours
 - Open and save **.xlsx** (values, formulas, formatting, layout, data tools, charts, pictures, page setup) and **.csv** (also .tsv/.txt, delimiter detected); Ctrl+S saves to a file on disk
 - Print with preview and export PDF (Ctrl+P): page setup, print area, titles on every page, headers/footers, fit to page
 - Multiple sheets (add, rename, delete), undo/redo for everything, autosave in the browser

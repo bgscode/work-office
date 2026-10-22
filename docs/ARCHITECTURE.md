@@ -63,7 +63,7 @@ inserted or deleted lines. A chart stores references to its data, never the
 numbers: `chart_view` reads the cells each time the chart is drawn, so it
 updates live. The UI turns anchors into pixels with the grid's layout
 (`apps/web/src/sheets/charts/DrawingLayer.tsx`) and draws charts on a canvas
-(`charts/renderChart.ts`). `.xlsx` drawings, charts and media are read and
+(`charts/renderChart.ts`). Shapes (`shape.rs`) are DrawingML preset geometries drawn by `charts/renderShape.ts`. `.xlsx` drawings, charts and media are read and
 written by `crates/formats/src/xlsx/drawings.rs`.
 
 ## Printing

@@ -472,6 +472,31 @@ const ICONS: Record<string, Paths> = {
       <path d="M6.5 3.5h1M10.5 3.5h1M3 7.5v1M3 11.5v1" {...s} />
     </>
   ),
+  shapes: () => (
+    <>
+      <rect x="1.5" y="7.5" width="7" height="7" {...s} fill={BLUE} fillOpacity={0.25} stroke={BLUE} />
+      <circle cx="10.5" cy="5.5" r="4" {...s} fill={GOLD} fillOpacity={0.35} stroke={GOLD} />
+    </>
+  ),
+  textBox: () => (
+    <>
+      <rect x="1.5" y="2.5" width="13" height="11" {...s} />
+      <path d="M4.5 5.5h7M8 5.5v6" {...s} stroke={BLUE} strokeWidth={1.4} />
+    </>
+  ),
+  lineWeight: () => (
+    <>
+      <path d="M2 3.5h12" {...s} strokeWidth={0.75} />
+      <path d="M2 7.5h12" {...s} strokeWidth={1.5} />
+      <path d="M2 12h12" {...s} strokeWidth={3} />
+    </>
+  ),
+  arrowLine: () => (
+    <>
+      <path d="M2 14L13 3" {...s} />
+      <path d="M8.5 3H13v4.5" {...s} />
+    </>
+  ),
   freeze: () => (
     <>
       <rect x="1.5" y="1.5" width="13" height="13" {...s} />
