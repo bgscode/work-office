@@ -73,6 +73,7 @@ import { WorkbookTitle, type SaveStatus } from "./WorkbookTitle";
 import { Icon } from "@office/ui";
 import { Select } from "./Select";
 import { FormatCellsDialog, type FormatTab } from "./features/FormatCellsDialog";
+import { NameEditDialog, NameManagerDialog, absoluteRef, readNames } from "./features/names";
 import { ChartTitlesDialog, SelectDataDialog, chartDesignTab, insertChartCommands, type ChartContext, type ChartDialog } from "./features/charts";
 import { rectAnchor, type Rect4 } from "./charts/DrawingLayer";
 import { ShapesGallery, insertShapeCommands, shapeFormatTab, type ShapeContext } from "./features/shapes";
@@ -150,6 +151,9 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
   const changed = () => setRevision((r) => r + 1);
   /** Format Cells (Ctrl+1): the tab it opens on, or null when closed. */
   const [formatDialog, setFormatDialog] = useState<FormatTab | null>(null);
+  /** Formulas → Name Manager / Define Name. */
+  const [nameDialog, setNameDialog] = useState<"manager" | "define" | null>(null);
+  const [showFormulas, setShowFormulas] = useState(false);
   // Files and printing: File → Print view, Page Setup dialog, a short "saved" note.
   const [printOpen, setPrintOpen] = useState(false);
   const [pageSetupTab, setPageSetupTab] = useState<PageSetupTab | null>(null);
@@ -299,6 +303,15 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
     return r.length === 4 && (r[0] !== row || r[1] !== col) ? doc.input(sheet, r[0], r[1]) : "";
   }
 
+  const names = useMemo(() => readNames(doc), [doc, revision]);
+
+  /** Define Name suggests the text above the selection (a header), like Excel. */
+  function suggestedName(): string {
+    if (sel.top === 0) return "";
+    const above = doc.displayBlock(sheet, sel.top - 1, sel.left, 1, 1)[0].trim().replace(/[^\p{L}\p{N}_.]+/gu, "_");
+    return /^[\p{L}_]/u.test(above) ? above : "";
+  }
+
   // ---- editing
 
   function startEdit(source: EditState["source"], initialText?: string) {
@@ -405,12 +418,16 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
     isFormula && (canInsertRef(editing!.draft, editing!.caret) || editing!.point?.end === editing!.caret);
 
   const word = isFormula ? wordAtCaret(editing!.draft, editing!.caret) : null;
+  // Defined names are suggested too (after the functions), like Excel.
+  const nameSuggestions: FunctionInfo[] = names.map((n) => ({ name: n.name, syntax: n.name, summary: `Name: =${n.refersTo}` }));
   const suggestions: FunctionInfo[] =
     word && assistDismissedAt !== word.start && editing!.draft[editing!.caret] !== "("
-      ? functionList()
-          .filter((f) => f.name.startsWith(word.text.toUpperCase()))
-          .sort((a, b) => popularity(a.name) - popularity(b.name) || a.name.localeCompare(b.name))
-          .slice(0, 8)
+      ? [
+          ...functionList()
+            .filter((f) => f.name.startsWith(word.text.toUpperCase()))
+            .sort((a, b) => popularity(a.name) - popularity(b.name) || a.name.localeCompare(b.name)),
+          ...nameSuggestions.filter((n) => n.name.toUpperCase().startsWith(word.text.toUpperCase())),
+        ].slice(0, 8)
       : [];
   const hintName = isFormula ? enclosingFunction(editing!.draft, editing!.caret) : null;
   const hint = hintName ? (functionList().find((f) => f.name === hintName) ?? null) : null;
@@ -418,8 +435,10 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
 
   function acceptSuggestion(f: FunctionInfo) {
     if (!editing || !word) return;
-    const draft = editing.draft.slice(0, word.start) + f.name + "(" + editing.draft.slice(editing.caret);
-    replaceDraft(draft, word.start + f.name.length + 1);
+    const isName = f.summary.startsWith("Name: ") && names.some((n) => n.name === f.name);
+    const open = isName ? "" : "(";
+    const draft = editing.draft.slice(0, word.start) + f.name + open + editing.draft.slice(editing.caret);
+    replaceDraft(draft, word.start + f.name.length + open.length);
   }
 
   /** Keys handled before the editor's own: line breaks, Ctrl+Enter, autocomplete. */
@@ -1202,6 +1221,15 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       e.preventDefault();
       if (editing) commit(0, 0);
       setFormatDialog("number");
+    } else if (mod && e.key === "`") {
+      // Ctrl+`: Show Formulas.
+      e.preventDefault();
+      setShowFormulas((v) => !v);
+    } else if (e.key === "F3" && mod && !e.shiftKey) {
+      // Ctrl+F3: Name Manager.
+      e.preventDefault();
+      if (editing) commit(0, 0);
+      setNameDialog("manager");
     } else if (e.key === "F12") {
       e.preventDefault();
       if (editing) commit(0, 0);
@@ -1564,6 +1592,9 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
           group: "Function Library",
           onRun: openInsertFunction,
         },
+        { id: "name-manager", label: "Name Manager", shortcut: `${MOD_KEY}F3`, title: "Create, edit, delete and find all the names used in the workbook.", icon: "nameManager", size: "large", group: "Defined Names", onRun: () => setNameDialog("manager") },
+        { id: "define-name", label: "Define Name", title: "Name the selected cells so formulas can use the name instead of the reference, e.g. =SUM(Sales).", icon: "defineName", size: "small", group: "Defined Names", onRun: () => setNameDialog("define") },
+        { id: "show-formulas", label: "Show Formulas", shortcut: `${MOD_KEY}\``, title: "Display the formula in each cell instead of the resulting value.", icon: "function", size: "small", group: "Formula Auditing", active: showFormulas, onRun: () => setShowFormulas((v) => !v) },
       ],
     },
     {
@@ -1624,6 +1655,25 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
             ref={nameBoxRef}
             label={geo.merges.label(selection)}
             onGo={goTo}
+            names={names.map((n) => n.name)}
+            onName={(text) => {
+              const target = doc.nameTarget(text, sheet);
+              if (target.length === 5) {
+                // A name for cells: go there (switching sheets if needed), like Excel.
+                if (target[0] !== sheet) setSheet(target[0]);
+                goTo({ anchor: { row: target[1], col: target[2] }, focus: { row: target[3], col: target[4] } });
+                return true;
+              }
+              if (names.some((n) => n.name.toLowerCase() === text.toLowerCase())) return true;
+              // A new name: give it to the selected cells.
+              const err = doc.defineName(text, absoluteRef(doc.sheetNames()[sheet], sel), -1, "", "", -1);
+              if (err) {
+                setMessage({ title: "Name Box", message: err });
+                return false;
+              }
+              changed();
+              return true;
+            }}
             onDone={() => cellInputRef.current?.focus({ preventScroll: true })}
           />
         }
@@ -1692,6 +1742,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
           }}
           onDeleteDrawing={deleteDrawing}
           onDrawingMenu={drawingMenu}
+          showFormulas={showFormulas}
           drawingTool={drawingTool}
           onDrawShape={drawShape}
           onShapeText={(id, text) => {
@@ -1782,6 +1833,31 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       )}
       {insertFunctionOpen && <InsertFunctionDialog onInsert={closeInsertFunction} onClose={() => closeInsertFunction(null)} />}
       {renderDataDialog()}
+      {nameDialog === "manager" && (
+        <NameManagerDialog
+          doc={doc}
+          revision={revision}
+          selectionRef={absoluteRef(doc.sheetNames()[sheet], sel)}
+          onChanged={changed}
+          onClose={() => {
+            setNameDialog(null);
+            cellInputRef.current?.focus({ preventScroll: true });
+          }}
+        />
+      )}
+      {nameDialog === "define" && (
+        <NameEditDialog
+          doc={doc}
+          editing={null}
+          initialRef={absoluteRef(doc.sheetNames()[sheet], sel)}
+          initialName={suggestedName()}
+          onDone={changed}
+          onClose={() => {
+            setNameDialog(null);
+            cellInputRef.current?.focus({ preventScroll: true });
+          }}
+        />
+      )}
       {formatDialog && (
         <FormatCellsDialog
           style={activeStyle}

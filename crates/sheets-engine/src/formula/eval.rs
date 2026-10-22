@@ -49,7 +49,15 @@ pub trait CellSource {
     fn is_row_hidden(&self, _sheet: Option<&str>, _row: u32) -> bool {
         false
     }
+
+    /// What a defined name refers to (Formulas → Name Manager), parsed.
+    fn name_expr(&self, _name: &str) -> Option<Expr> {
+        None
+    }
 }
+
+/// Names that refer to names stop resolving this deep (a name that refers to itself).
+const MAX_NAME_DEPTH: u8 = 16;
 
 /// A resolved reference: a range on the formula's own sheet (`sheet: None`) or on a named sheet.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +75,8 @@ pub(crate) struct Ctx<'a> {
     pub dynamic: RefCell<Vec<Reference>>,
     /// Names bound by `LET`, innermost last (upper case).
     pub lets: RefCell<Vec<(String, Arg)>>,
+    /// How many defined names are being resolved inside each other.
+    pub name_depth: std::cell::Cell<u8>,
 }
 
 impl Ctx<'_> {
@@ -82,6 +92,22 @@ impl Ctx<'_> {
             },
             Some(_) => RangeValues { rows: 1, cols: 1, values: vec![Value::Error(ErrorKind::Ref)] },
         }
+    }
+
+    /// What a defined name refers to, unless resolving it again would loop.
+    pub fn defined(&self, name: &str) -> Option<Expr> {
+        if self.name_depth.get() >= MAX_NAME_DEPTH {
+            return None;
+        }
+        self.src.name_expr(name)
+    }
+
+    /// Evaluate `f` one defined-name level deeper.
+    pub fn deeper<T>(&self, f: impl FnOnce() -> T) -> T {
+        self.name_depth.set(self.name_depth.get() + 1);
+        let out = f();
+        self.name_depth.set(self.name_depth.get() - 1);
+        out
     }
 
     /// The value of a name: a `LET` variable.
@@ -114,7 +140,13 @@ impl Ctx<'_> {
 
 /// Evaluate to a single value, with no current cell (`ROW()` without arguments is `#VALUE!`).
 pub fn eval(expr: &Expr, src: &dyn CellSource) -> Value {
-    let ctx = Ctx { src, at: None, dynamic: RefCell::new(Vec::new()), lets: RefCell::new(Vec::new()) };
+    let ctx = Ctx {
+        src,
+        at: None,
+        dynamic: RefCell::new(Vec::new()),
+        lets: RefCell::new(Vec::new()),
+        name_depth: std::cell::Cell::new(0),
+    };
     eval_in(expr, &ctx)
 }
 
@@ -122,7 +154,13 @@ pub fn eval(expr: &Expr, src: &dyn CellSource) -> Value {
 /// `OFFSET`/`INDIRECT` resolved to, which the caller should treat as extra
 /// precedents of the cell.
 pub fn eval_at(expr: &Expr, src: &dyn CellSource, at: CellRef) -> (Value, Vec<Reference>) {
-    let ctx = Ctx { src, at: Some(at), dynamic: RefCell::new(Vec::new()), lets: RefCell::new(Vec::new()) };
+    let ctx = Ctx {
+        src,
+        at: Some(at),
+        dynamic: RefCell::new(Vec::new()),
+        lets: RefCell::new(Vec::new()),
+        name_depth: std::cell::Cell::new(0),
+    };
     let value = eval_in(expr, &ctx);
     (value, ctx.dynamic.into_inner())
 }
@@ -130,7 +168,13 @@ pub fn eval_at(expr: &Expr, src: &dyn CellSource, at: CellRef) -> (Value, Vec<Re
 /// Evaluate the formula in cell `at` as Excel 365 does: the result may be an
 /// array, which the sheet spills into the cells around `at`.
 pub fn eval_at_any(expr: &Expr, src: &dyn CellSource, at: CellRef) -> (Arg, Vec<Reference>) {
-    let ctx = Ctx { src, at: Some(at), dynamic: RefCell::new(Vec::new()), lets: RefCell::new(Vec::new()) };
+    let ctx = Ctx {
+        src,
+        at: Some(at),
+        dynamic: RefCell::new(Vec::new()),
+        lets: RefCell::new(Vec::new()),
+        name_depth: std::cell::Cell::new(0),
+    };
     let value = arrays::eval_any(expr, &ctx);
     (value, ctx.dynamic.into_inner())
 }
@@ -150,7 +194,10 @@ pub(crate) fn eval_in(expr: &Expr, ctx: &Ctx) -> Value {
         Expr::Name(n) => match ctx.name(n) {
             Some(Arg::Value(v)) => v,
             Some(Arg::Range(r)) => r.values.into_iter().next().unwrap_or(Value::Empty),
-            None => Value::Error(ErrorKind::Name),
+            None => match ctx.defined(n) {
+                Some(e) => ctx.deeper(|| eval_in(&e, ctx)),
+                None => Value::Error(ErrorKind::Name),
+            },
         },
         Expr::Error(e) => Value::Error(*e),
         Expr::Missing => Value::Empty,
@@ -196,6 +243,11 @@ pub(crate) fn eval_ref(expr: &Expr, ctx: &Ctx) -> Option<Result<Reference, Error
         Expr::SheetRef(s, c) => Some(Ok(Reference { sheet: Some(s.clone()), range: Range::single(*c) })),
         Expr::SheetRange(s, r) => Some(Ok(Reference { sheet: Some(s.clone()), range: *r })),
         Expr::Call(name, args) => special::reference_call(name, args, ctx),
+        // A defined name that refers to cells: `Sales` -> `Sheet1!$B$2:$B$100`.
+        Expr::Name(n) if ctx.name(n).is_none() => {
+            let e = ctx.defined(n)?;
+            ctx.deeper(|| eval_ref(&e, ctx))
+        }
         _ => None,
     }
 }
@@ -214,6 +266,11 @@ pub(crate) fn eval_arg(expr: &Expr, ctx: &Ctx) -> Arg {
             None => Arg::Value(call(name, args, ctx)),
         },
         // Operators, names and array functions may give arrays: `SUM(A1:A9*B1:B9)`, `SUM(FILTER(...))`.
+        Expr::Name(n) if ctx.name(n).is_none() => match eval_ref(expr, ctx) {
+            Some(Ok(r)) => Arg::Range(ctx.values(&r)),
+            Some(Err(e)) => Arg::Value(Value::Error(e)),
+            None => arrays::eval_any(expr, ctx),
+        },
         Expr::Binary(..) | Expr::Unary(..) | Expr::Name(_) => arrays::eval_any(expr, ctx),
         Expr::Call(name, _) if arrays::is_array_function(name) => arrays::eval_any(expr, ctx),
         other => Arg::Value(eval_in(other, ctx)),

@@ -105,6 +105,8 @@ export interface GridProps {
   listArrow: boolean;
   /** The list arrow was clicked; x/y is where the list opens, width the cell's. */
   onListArrow: (x: number, y: number, width: number) => void;
+  /** Formulas → Show Formulas. */
+  showFormulas: boolean;
   /** Data Validation input message for the active cell. */
   inputMessage: { title: string; message: string } | null;
   /** Tab moved right (not editing): remember where a run of Tab entries started. */
@@ -210,8 +212,9 @@ export function Grid(props: GridProps) {
       filter: props.filter,
       circles: props.circles,
       spill: spillRect,
+      showFormulas: props.showFormulas,
     });
-  }, [doc, sheet, revision, selection, scroll, size, zoom, geo, props.highlights, fillPreview, showFillHandle, props.filter, props.circles, spillRect]);
+  }, [doc, sheet, revision, selection, scroll, size, zoom, geo, props.highlights, fillPreview, showFillHandle, props.filter, props.circles, spillRect, props.showFormulas]);
 
   // Scroll a cell (or its merged area) into view after the spacer has grown to include it.
   useLayoutEffect(() => {

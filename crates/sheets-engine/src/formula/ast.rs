@@ -75,6 +75,20 @@ impl Expr {
         out
     }
 
+    /// Identifiers that may be defined names (`Sales` in `=SUM(Sales)`), upper case.
+    pub fn names(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        self.visit(&mut |e| {
+            if let Expr::Name(n) = e {
+                let n = n.to_ascii_uppercase();
+                if !out.contains(&n) {
+                    out.push(n);
+                }
+            }
+        });
+        out
+    }
+
     /// True if the expression calls a volatile function (`NOW`, `RAND`, `OFFSET`...).
     pub fn is_volatile(&self) -> bool {
         let mut found = false;

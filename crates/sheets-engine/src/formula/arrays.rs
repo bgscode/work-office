@@ -135,7 +135,11 @@ pub(crate) fn eval_any(expr: &Expr, ctx: &Ctx) -> Arg {
         },
         Expr::Name(n) => match ctx.name(n) {
             Some(a) => a,
-            None => Arg::Value(super::eval::eval_in(expr, ctx)),
+            // A defined name: its cells as an array, or its formula's result.
+            None => match ctx.defined(n) {
+                Some(e) => ctx.deeper(|| eval_any(&e, ctx)),
+                None => Arg::Value(Value::Error(ErrorKind::Name)),
+            },
         },
         Expr::Unary(op, e) => match eval_any(e, ctx) {
             Arg::Value(v) => Arg::Value(unary_value(*op, v)),

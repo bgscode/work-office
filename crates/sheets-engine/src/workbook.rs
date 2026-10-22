@@ -37,6 +37,8 @@ impl Worksheet {
 #[derive(Debug, Clone)]
 pub struct Workbook {
     pub sheets: Vec<Worksheet>,
+    /// Defined names (see `names.rs`), sorted by name.
+    pub names: Vec<crate::names::DefinedName>,
 }
 
 impl Default for Workbook {
@@ -48,12 +50,12 @@ impl Default for Workbook {
 impl Workbook {
     /// A workbook with one empty "Sheet1".
     pub fn new() -> Self {
-        Workbook { sheets: vec![Worksheet::new("Sheet1".into(), Sheet::new())] }
+        Workbook { sheets: vec![Worksheet::new("Sheet1".into(), Sheet::new())], names: Vec::new() }
     }
 
     /// An empty workbook, for importers that add their own sheets.
     pub fn empty() -> Self {
-        Workbook { sheets: Vec::new() }
+        Workbook { sheets: Vec::new(), names: Vec::new() }
     }
 
     /// Append a sheet named "SheetN" (first free N) and return its index.
@@ -140,10 +142,21 @@ impl Workbook {
         self.recalc_round(changed, 0);
     }
 
+    /// Recalculate these cells and everything that depends on them.
+    pub(crate) fn recalc_cells(&mut self, changed: Vec<Node>) {
+        self.recalc(changed);
+    }
+
     fn recalc_round(&mut self, changed: Vec<Node>, round: u32) {
         let links = self.link_index();
         let everything = changed.is_empty();
-        if everything && links.is_empty() && self.sheets.iter().all(|ws| ws.sheet.volatiles().next().is_none()) {
+        if everything
+            && links.is_empty()
+            && self
+                .sheets
+                .iter()
+                .all(|ws| ws.sheet.volatiles().next().is_none() && ws.sheet.name_users().next().is_none())
+        {
             return;
         }
         let deps = |book: &Workbook, (s, c): Node| -> Vec<Node> {
@@ -170,7 +183,7 @@ impl Workbook {
                 stack.push((s, f));
             }
             if everything {
-                for f in ws.sheet.links() {
+                for f in ws.sheet.links().chain(ws.sheet.name_users()) {
                     dirty.insert((s, f));
                     stack.push((s, f));
                 }
@@ -229,6 +242,21 @@ impl Workbook {
                     }
                 }
             }
+            // Formulas using defined names read the cells those names refer to.
+            for f in ws.sheet.name_users() {
+                let Some(expr) = ws.sheet.formula_expr(f) else { continue };
+                for name in expr.names() {
+                    let Some(d) = self.defined_name(&name, s) else { continue };
+                    for range in d.expr().precedents() {
+                        out.entry(s).or_default().push((range, (s, f)));
+                    }
+                    for (sheet, range) in d.expr().sheet_precedents() {
+                        if let Some(target) = self.sheet_index(&sheet) {
+                            out.entry(target).or_default().push((range, (s, f)));
+                        }
+                    }
+                }
+            }
         }
         out
     }
@@ -283,6 +311,10 @@ impl CellSource for BookSource<'_> {
 
     fn is_row_hidden(&self, sheet: Option<&str>, row: u32) -> bool {
         self.named(sheet).is_some_and(|s| s.is_row_hidden(row))
+    }
+
+    fn name_expr(&self, name: &str) -> Option<crate::formula::Expr> {
+        self.book.defined_name(name, self.sheet).map(|d| d.expr().clone())
     }
 }
 

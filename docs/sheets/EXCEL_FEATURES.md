@@ -89,9 +89,9 @@ When you finish an item, update its row in the same pull request.
 | `TODAY`, `NOW`, `RAND`, `OFFSET`, `INDIRECT` recalculate on every change (volatile) | ✅ | P1 | M3 |
 | `SUBTOTAL`, `AGGREGATE`, `ROW`, `COLUMN`, `ROWS`, `COLUMNS`, `OFFSET`, `INDIRECT`, `ADDRESS` | ✅ | P1 | M3 |
 | Financial functions: `PMT`, `FV`, `PV`, `NPV`, `XNPV`, `IRR`, `XIRR`, `RATE`, `NPER`, `IPMT`, `PPMT`, `SLN`, `DB`, `DDB`, `EFFECT`, `NOMINAL` | ✅ | P1 | M3 |
-| Named ranges (Name Manager, use names in formulas) | ⬜ | P2 | – |
+| Named ranges: Name Box, Define Name, Name Manager (Ctrl+F3), workbook/sheet scope, names in formulas and autocomplete, saved in .xlsx | ✅ | P1 | I3 |
 | Dynamic arrays that spill: `FILTER`, `SORT`, `SORTBY`, `UNIQUE`, `SEQUENCE`, `TAKE`, `DROP`, `VSTACK`, `TEXTSPLIT`…; element-wise operators; `#SPILL!` | ✅ | P1 | I2 |
-| Show formulas (Ctrl+`) | ⬜ | P2 | – |
+| Show formulas (Ctrl+`) | ✅ | P2 | I3 |
 | Error checking, trace precedents/dependents | ⬜ | P3 | – |
 | `LET`, `XMATCH` | ✅ | P2 | I2 |
 | `LAMBDA`, `MAP`, `REDUCE`, array constants `{1,2;3,4}` | ⬜ | P3 | – |

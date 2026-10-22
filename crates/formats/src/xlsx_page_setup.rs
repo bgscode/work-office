@@ -82,8 +82,10 @@ pub(super) fn read_sheet(xml: &str) -> PageSetup {
 pub(super) fn apply_defined_names(workbook_xml: &str, sheet_order: &[String], book: &mut Workbook) {
     let mut names: Vec<(String, String, String)> = Vec::new(); // (name, localSheetId, text)
     let mut current: Option<(String, String, String)> = None;
+    let mut hidden: Vec<bool> = Vec::new();
     walk(workbook_xml, |ev| match ev {
         XmlEvent::Start { name: "definedName", attrs } => {
+            hidden.push(matches!(&*attr(attrs, "hidden"), "1" | "true"));
             current = Some((attr(attrs, "name").to_string(), attr(attrs, "localSheetId").to_string(), String::new()))
         }
         XmlEvent::Text(t) => {
@@ -94,10 +96,19 @@ pub(super) fn apply_defined_names(workbook_xml: &str, sheet_order: &[String], bo
         XmlEvent::End { name: "definedName" } => names.extend(current.take()),
         _ => {}
     });
-    for (name, local, text) in names {
+    for ((name, local, text), hidden) in names.into_iter().zip(hidden) {
         let is_area = name.eq_ignore_ascii_case("_xlnm.Print_Area");
         let is_titles = name.eq_ignore_ascii_case("_xlnm.Print_Titles");
         if !is_area && !is_titles {
+            // The user's names (Name Manager); Excel's own `_xlnm.` names and hidden ones are skipped.
+            if !hidden && !name.starts_with("_xlnm.") && sheets_engine::names::check_name(&name).is_ok() {
+                let scope = local.parse::<usize>().ok().and_then(|i| {
+                    let n = sheet_order.get(i)?;
+                    book.sheets.iter().position(|ws| ws.name.eq_ignore_ascii_case(n))
+                });
+                let refers_to = text.replace("_xlfn._xlws.", "").replace("_xlfn.", "");
+                book.names.push(sheets_engine::names::DefinedName::new(&name, &refers_to, scope));
+            }
             continue;
         }
         for (sheet_name, reference) in split_references(&text) {
@@ -279,9 +290,17 @@ fn quoted_sheet(name: &str) -> String {
     }
 }
 
-/// `<definedName>` entries for print areas and titles.
+/// `<definedName>` entries for the user's names, print areas and titles.
 fn defined_names(book: &Workbook) -> String {
     let mut out = String::new();
+    for d in &book.names {
+        let local = d.scope.map_or(String::new(), |i| format!(r#" localSheetId="{i}""#));
+        out.push_str(&format!(
+            r#"<definedName name="{}"{local}>{}</definedName>"#,
+            escape(&d.name),
+            escape(&super::add_function_prefixes(&d.refers_to))
+        ));
+    }
     for (i, ws) in book.sheets.iter().enumerate() {
         let sheet = quoted_sheet(&ws.name);
         let p = &ws.page_setup;

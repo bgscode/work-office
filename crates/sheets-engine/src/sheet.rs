@@ -153,6 +153,8 @@ pub struct Sheet {
     links: HashSet<CellRef>,
     /// Formulas with volatile functions.
     volatiles: HashSet<CellRef>,
+    /// Formulas that use defined names; the workbook recalculates them when the names' cells change.
+    name_users: HashSet<CellRef>,
     /// Smallest (rows, cols) that has ever held data. Grows only.
     extent: (u32, u32),
     styles: HashMap<CellRef, Style>,
@@ -486,6 +488,7 @@ impl Sheet {
             }
             self.links.remove(&at);
             self.volatiles.remove(&at);
+            self.name_users.remove(&at);
         }
         if input.is_empty() {
             return;
@@ -511,6 +514,9 @@ impl Sheet {
                 // TODAY, NOW, RAND, OFFSET, INDIRECT...: recalculated every time.
                 if expr.is_volatile() {
                     self.volatiles.insert(at);
+                }
+                if !expr.names().is_empty() {
+                    self.name_users.insert(at);
                 }
                 // Like Excel, =TODAY() shows a date and =PMT(...) money unless the cell has a format.
                 if self.style(at).number_format == NumberFormat::General {
@@ -832,6 +838,11 @@ impl Sheet {
     /// Formulas that read other sheets.
     pub(crate) fn links(&self) -> impl Iterator<Item = CellRef> + '_ {
         self.links.iter().copied()
+    }
+
+    /// Formulas that use defined names.
+    pub(crate) fn name_users(&self) -> impl Iterator<Item = CellRef> + '_ {
+        self.name_users.iter().copied()
     }
 
     /// Formulas with volatile functions.

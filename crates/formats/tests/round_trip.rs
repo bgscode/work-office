@@ -116,6 +116,10 @@ fn build() -> Workbook {
     );
     s.set_drawings(drawings);
 
+    book.names = vec![
+        sheets_engine::names::DefinedName::new("Sales", "Sheet1!$B$2:$B$5", None),
+        sheets_engine::names::DefinedName::new("Rate", "0.18", Some(1)),
+    ];
     let p = &mut book.sheets[0].page_setup;
     p.set("orientation", "landscape").unwrap();
     p.set("fit", "1,0").unwrap();
@@ -163,6 +167,9 @@ fn everything_round_trips() {
     assert_eq!(names, ["Chart 1", "Picture 1"]);
     assert_eq!(a.sheet.drawings().items[0].chart(), b.sheet.drawings().items[0].chart());
     assert_eq!(a.sheet.drawings().items[1].anchor, b.sheet.drawings().items[1].anchor);
+
+    // Defined names.
+    assert_eq!(back.names, book.names);
 
     // Page setup.
     assert_eq!(a.page_setup, b.page_setup);

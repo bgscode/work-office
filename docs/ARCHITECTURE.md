@@ -90,6 +90,15 @@ recalculates the formula. Formulas reading spilled cells count as dependents of
 the spilling formula; when a spill changes shape, its readers are recalculated in
 another round.
 
+## Defined names
+
+`Workbook::names` (`names.rs`) holds each name with its parsed `refers_to`.
+Formulas resolve a name through `CellSource::name_expr` (LET variables first).
+Formulas using names are listed per sheet (`name_users`) and indexed like
+cross-sheet links, so changing a named range's cells recalculates them; `SetNames`
+(undoable) recalculates them all. Sheet renames, deletes and row/column
+inserts rewrite `refers_to` with the same `refs.rs` helpers formulas use.
+
 ## Kinds of edits
 
 | Edit | Engine op | Undo |

@@ -30,6 +30,7 @@ mod charts;
 mod data_tools;
 mod files;
 mod layout;
+mod names;
 
 #[cfg(target_arch = "wasm32")]
 fn local_now_ms() -> f64 {
@@ -101,6 +102,18 @@ fn block(row: u32, col: u32, rows: u32, cols: u32) -> impl Iterator<Item = CellR
 }
 
 impl SheetsDocument {
+    /// Apply a structural change to `sheet`, moving defined names that point at
+    /// its rows/columns along with it (one undo step).
+    fn apply_with_names(&mut self, op: ReplaceSheet, sheet: usize, axis: Axis, map: &dyn Fn(u32) -> Option<u32>) {
+        let name = self.book.sheets[sheet].name.clone();
+        let names = self.book.names_rewritten(|t| refs::remap_sheet_input(t, &name, axis, map));
+        if names == self.book.names {
+            self.apply(op);
+        } else {
+            self.apply(Batch(vec![Box::new(op), Box::new(sheets_engine::names::SetNames { names })]));
+        }
+    }
+
     /// New inputs for formulas on other sheets that point at rows/columns of `sheet` that moved.
     fn lines_moved(
         &self,
@@ -229,6 +242,13 @@ impl SheetsDocument {
     pub fn display_block(&self, sheet: usize, row: u32, col: u32, rows: u32, cols: u32) -> Vec<String> {
         let s = self.sheet(sheet);
         block(row, col, rows, cols).map(|at| s.display(at)).collect()
+    }
+
+    /// Like `displayBlock`, but formula cells show their formula (Formulas → Show Formulas).
+    #[wasm_bindgen(js_name = formulaBlock)]
+    pub fn formula_block(&self, sheet: usize, row: u32, col: u32, rows: u32, cols: u32) -> Vec<String> {
+        let s = self.sheet(sheet);
+        block(row, col, rows, cols).map(|at| s.formula_input(at).map_or_else(|| s.display(at), String::from)).collect()
     }
 
     /// Value kind for a block of cells (see `ValueKind` in `@office/engine`), row-major.
@@ -432,16 +452,18 @@ impl SheetsDocument {
     pub fn insert_lines(&mut self, sheet: usize, axis: &str, at: u32, count: u32) {
         let axis = parse_axis(axis);
         let new = self.sheet(sheet).with_inserted(axis, at, count);
-        let links = self.lines_moved(sheet, axis, &refs::insert_map(at, count));
-        self.apply(ReplaceSheet { sheet, with: Box::new(new), links });
+        let map = refs::insert_map(at, count);
+        let links = self.lines_moved(sheet, axis, &map);
+        self.apply_with_names(ReplaceSheet { sheet, with: Box::new(new), links }, sheet, axis, &map);
     }
 
     #[wasm_bindgen(js_name = deleteLines)]
     pub fn delete_lines(&mut self, sheet: usize, axis: &str, at: u32, count: u32) {
         let axis = parse_axis(axis);
         let new = self.sheet(sheet).with_deleted(axis, at, count);
-        let links = self.lines_moved(sheet, axis, &refs::delete_map(at, count));
-        self.apply(ReplaceSheet { sheet, with: Box::new(new), links });
+        let map = refs::delete_map(at, count);
+        let links = self.lines_moved(sheet, axis, &map);
+        self.apply_with_names(ReplaceSheet { sheet, with: Box::new(new), links }, sheet, axis, &map);
     }
 
     /// Sort the rows of a rectangle by the values in column `key_col`.
@@ -776,7 +798,7 @@ fn formatting_json(s: &Style) -> Vec<String> {
     parts
 }
 
-fn json_string(s: &str) -> String {
+pub(crate) fn json_string(s: &str) -> String {
     let mut out = String::from("\"");
     for ch in s.chars() {
         match ch {

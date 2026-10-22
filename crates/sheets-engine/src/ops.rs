@@ -130,7 +130,14 @@ pub struct InsertSheet {
 
 impl Op<Workbook> for InsertSheet {
     fn apply(&self, doc: &mut Workbook) {
-        doc.sheets.insert(self.index.min(doc.sheets.len()), self.sheet.clone());
+        let index = self.index.min(doc.sheets.len());
+        doc.sheets.insert(index, self.sheet.clone());
+        // Sheet-scoped names keep pointing at their sheets.
+        for d in &mut doc.names {
+            if let Some(s) = d.scope.as_mut().filter(|s| **s >= index) {
+                *s += 1;
+            }
+        }
         doc.recalc_links();
     }
 
@@ -155,6 +162,16 @@ impl Op<Workbook> for RemoveSheet {
         for (s, edits) in doc.link_edits(None, |input| refs::delete_sheet_input(input, &name)) {
             doc.set_inputs(s, edits);
         }
+        // Names scoped to the sheet go; names pointing at it become #REF!.
+        let index = self.index;
+        let mut names = doc.names_rewritten(|t| refs::delete_sheet_input(t, &name));
+        names.retain(|d| d.scope != Some(index));
+        for d in &mut names {
+            if let Some(s) = d.scope.as_mut().filter(|s| **s > index) {
+                *s -= 1;
+            }
+        }
+        doc.names = names;
         doc.recalc_links();
     }
 
@@ -170,6 +187,7 @@ impl Op<Workbook> for RemoveSheet {
         let mut ops: Vec<Box<dyn Op<Workbook>>> =
             vec![Box::new(InsertSheet { index: self.index, sheet: doc.sheets[self.index].clone() })];
         ops.extend(restore);
+        ops.push(Box::new(crate::names::SetNames { names: doc.names.clone() }));
         Box::new(Sequence(ops))
     }
 }
@@ -188,6 +206,7 @@ impl Op<Workbook> for RenameSheet {
         for (s, edits) in doc.link_edits(None, |input| refs::rename_sheet_input(input, &old, &self.name)) {
             doc.set_inputs(s, edits);
         }
+        doc.names = doc.names_rewritten(|t| refs::rename_sheet_input(t, &old, &self.name));
         doc.recalc_links();
     }
 

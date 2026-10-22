@@ -75,6 +75,8 @@ export interface PaintInput {
   circles: { row: number; col: number }[];
   /** The dynamic array the active cell belongs to: outlined in blue, like Excel. */
   spill: Rect | null;
+  /** Formulas → Show Formulas (Ctrl+`): formula cells show their formula. */
+  showFormulas: boolean;
 }
 
 /** Size of an AutoFilter dropdown button. */
@@ -133,7 +135,7 @@ function paintCells(ctx: CanvasRenderingContext2D, p: PaintInput, pane: Pane) {
   const nCols = pane.cols.last - c0 + 1;
   if (nRows <= 0 || nCols <= 0) return;
 
-  const texts = doc.displayBlock(sheet, r0, c0, nRows, nCols);
+  const texts = p.showFormulas ? doc.formulaBlock(sheet, r0, c0, nRows, nCols) : doc.displayBlock(sheet, r0, c0, nRows, nCols);
   const kinds = doc.kindBlock(sheet, r0, c0, nRows, nCols);
   const styles = doc.styleBlock(sheet, r0, c0, nRows, nCols).map(parseStyle);
   // Conditional formatting overrides the cell's own fill, colour and font style;

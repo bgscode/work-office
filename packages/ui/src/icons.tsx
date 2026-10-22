@@ -497,6 +497,20 @@ const ICONS: Record<string, Paths> = {
       <path d="M8.5 3H13v4.5" {...s} />
     </>
   ),
+  nameManager: () => (
+    <>
+      <rect x="1.5" y="2.5" width="13" height="11" {...s} />
+      <path d="M1.5 6h13M5.5 2.5v11" {...s} />
+      <path d="M7.5 8.5h5M7.5 11h3.5" {...s} stroke={BLUE} />
+    </>
+  ),
+  defineName: () => (
+    <>
+      <rect x="1.5" y="4.5" width="10" height="7" rx="1" {...s} />
+      <path d="M4 8h5" {...s} stroke={BLUE} />
+      <path d="M13 2v5M10.5 4.5h5" {...s} stroke={GREEN} strokeWidth={1.5} />
+    </>
+  ),
   freeze: () => (
     <>
       <rect x="1.5" y="1.5" width="13" height="13" {...s} />

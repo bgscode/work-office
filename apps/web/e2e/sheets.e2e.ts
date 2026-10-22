@@ -278,3 +278,40 @@ test("dynamic arrays spill like Excel 365", async ({ page }) => {
   await expect(formulaBar(page)).toHaveValue("=FILTER(A2:A5, B2:B5>100)");
   await expectNoErrors(errors);
 });
+
+test("defined names: Name Box, formulas, Name Manager", async ({ page }) => {
+  const { errors, cell } = await openWorkbook(page);
+  await clickCell(page, await cell(0, 0));
+  await typeRows(page, TABLE);
+  // Select B2:B5 and name it in the Name Box.
+  await clickCell(page, await cell(1, 1));
+  await page.keyboard.down("Shift");
+  await clickCell(page, await cell(4, 1));
+  await page.keyboard.up("Shift");
+  const nameBox = page.getByRole("textbox", { name: /Name Box/ });
+  await nameBox.click();
+  await nameBox.fill("Sales");
+  await nameBox.press("Enter");
+  await clickCell(page, await cell(0, 4));
+  await page.keyboard.type("=SUM(Sal");
+  await expect(page.getByRole("option", { name: /Sales/ }).first()).toBeVisible();
+  await page.keyboard.press("Tab");
+  await page.keyboard.type(")");
+  await page.keyboard.press("Enter");
+  await clickCell(page, await cell(0, 4));
+  await expect(formulaBar(page)).toHaveValue("=SUM(Sales)");
+  // Going to a name selects its cells.
+  await clickCell(page, await cell(8, 8));
+  await nameBox.click();
+  await nameBox.fill("Sales");
+  await nameBox.press("Enter");
+  await expect(nameBox).toHaveValue("B2:B5");
+  // Name Manager lists it; Show Formulas shows formulas in cells.
+  await page.keyboard.press("Control+F3");
+  await expect(page.locator(".names-table")).toContainText("Sheet1!$B$2:$B$5");
+  await page.locator(".dialog-footer").getByRole("button", { name: "Close" }).click();
+  await page.keyboard.press("Control+`");
+  await ribbonTab(page, "Formulas");
+  await expect(page.locator('.ribbon-commands button[aria-label="Show Formulas"]')).toHaveAttribute("aria-pressed", "true");
+  await expectNoErrors(errors);
+});

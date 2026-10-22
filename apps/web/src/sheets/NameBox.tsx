@@ -9,6 +9,10 @@ interface Props {
   /** Go to a cell or range. */
   onGo: (s: Selection) => void;
   onDone: () => void;
+  /** Something that isn't a cell: go to the defined name, or define it for the selection. False if not a valid name. */
+  onName?: (text: string) => boolean;
+  /** Defined names, listed in the dropdown like Excel's Name Box. */
+  names?: string[];
 }
 
 /** Parse a Name Box entry (B12, a1:c5) into a selection, or null. */
@@ -24,7 +28,7 @@ export function parseAddress(text: string): Selection | null {
  * The box left of the formula bar. Type a cell or range (B12, A1:C5) and press
  * Enter to go there. Its dropdown lists the places recently gone to.
  */
-export const NameBox = forwardRef<HTMLInputElement, Props>(function NameBox({ label, onGo, onDone }, ref) {
+export const NameBox = forwardRef<HTMLInputElement, Props>(function NameBox({ label, onGo, onDone, onName, names = [] }, ref) {
   const [draft, setDraft] = useState<string | null>(null);
   const [invalid, setInvalid] = useState(false);
   const [recent, setRecent] = useState<string[]>([]);
@@ -42,7 +46,7 @@ export const NameBox = forwardRef<HTMLInputElement, Props>(function NameBox({ la
 
   function goTo(text: string): boolean {
     const s = parseAddress(text);
-    if (!s) return false;
+    if (!s) return !!text.trim() && !!onName?.(text.trim());
     const name = text.trim().toUpperCase();
     setRecent((r) => [name, ...r.filter((x) => x !== name)].slice(0, 8));
     onGo(s);
@@ -65,7 +69,7 @@ export const NameBox = forwardRef<HTMLInputElement, Props>(function NameBox({ la
         ref={ref}
         className={invalid ? "name-box invalid" : "name-box"}
         aria-label="Name Box: type a cell like B12 and press Enter"
-        title="Go to a cell: type B12 or A1:C5 and press Enter (Ctrl+G)"
+        title="Go to a cell or name: type B12, A1:C5 or a name and press Enter (Ctrl+G). Type a new name to name the selected cells."
         spellCheck={false}
         value={draft ?? label}
         onFocus={(e) => {
@@ -111,7 +115,24 @@ export const NameBox = forwardRef<HTMLInputElement, Props>(function NameBox({ la
       </button>
       {open && (
         <ul className="name-box-list office-menu" role="listbox" aria-label="Recent places">
-          {recent.length === 0 && <li className="empty">Type a cell (B12) or range (A1:C5) in the box and press Enter.</li>}
+          {recent.length === 0 && names.length === 0 && (
+            <li className="empty">Type a cell (B12) or range (A1:C5) and press Enter. Type a new name to name the selected cells.</li>
+          )}
+          {names.map((n) => (
+            <li
+              key={"name:" + n}
+              role="option"
+              aria-selected={false}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setOpen(false);
+                onName?.(n);
+                onDone();
+              }}
+            >
+              {n}
+            </li>
+          ))}
           {recent.map((r) => (
             <li
               key={r}
