@@ -37,3 +37,12 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm -r test
       - run: pnpm --filter @office/web build
+      # Browser tests of the main flows (apps/web/e2e) in Playwright's Chromium.
+      - run: pnpm --filter @office/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @office/web e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: apps/web/test-results
+

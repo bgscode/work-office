@@ -6,11 +6,14 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- Opening a file from Home could open an empty workbook instead (a race between navigation and the pending file).
 - Ctrl+S remembers the file on disk across reloads (the browser asks once to allow saving again).
 - Big printouts (hundreds or thousands of pages) are prepared in the background with progress and Cancel instead of freezing the app.
 - Freeze Panes works like Excel when the sheet is scrolled: it freezes the rows and columns on screen instead of the first ones, so the grid no longer gets stuck when the frozen part is bigger than the window; scrolled frozen panes in Excel files (`<sheetView topLeftCell>`) open correctly.
 
 ### Added
+
+- Quality (M7): browser tests for the main flows (typing and formulas, formatting and undo, filter and validation, charts and shapes, freeze panes, print, reload, damaged files, crash recovery) run in CI with Playwright; damaged, truncated or unsupported files (.xls, password-protected) give a clear message instead of failing, covered by fuzz-style tests; a recovery screen replaces a blank page if the app or the WebAssembly engine crashes.
 
 - Shapes: Insert → Shapes with Excel's gallery (lines and arrows, rectangles, basic shapes, block arrows, stars, callouts, flowchart) and Insert → Text Box. Drag on the sheet to draw (Shift keeps it square, a click inserts the default size); type to add text. Shape Format tab: Edit Shape, fill, outline colour and weight, arrowheads, font size, bold/italic, alignment, text colour, arrange. Shapes move, resize, undo, print, and are read from and saved to .xlsx (including Excel's theme-styled shapes).
 

@@ -156,7 +156,9 @@ When you finish an item, update its row in the same pull request.
 | Feature | Status | Priority | Milestone |
 |---|---|---|---|
 | Smooth with 100,000+ rows (3 × 100k rows opens in ~2.6 s, 2.8 ms paints, no autosave freezes) | ✅ | P1 | M7 |
-| Browser tests for the main flows, run in CI | ⬜ | P1 | M7 |
+| Browser tests for the main flows, run in CI (`apps/web/e2e`, Playwright) | ✅ | P1 | M7 |
+| Damaged or unsupported files give a clear message and never crash (fuzz-style tests in `crates/formats/tests/damaged_files.rs`) | ✅ | P1 | M7 |
+| Crash screen instead of a blank page if the app or engine fails (work is already saved) | ✅ | P1 | M7 |
 | Keyboard shortcuts help (Ctrl+/) | ⬜ | P2 | – |
 | Dark mode | ⬜ | P2 | – |
 | Hindi UI (and other languages) | ⬜ | P2 | – |

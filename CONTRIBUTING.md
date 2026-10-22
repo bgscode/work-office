@@ -85,9 +85,11 @@ in `packages/ui/src/icons.tsx` (16×16 grid). App chrome styles live in
 pnpm lint        # cargo fmt --check + clippy with warnings as errors
 pnpm test        # all Rust and TypeScript tests
 pnpm typecheck
+pnpm e2e         # browser tests of the main flows (apps/web/e2e, Playwright; uses your installed Chrome locally)
 ```
 
-CI runs the same commands. In addition:
+CI runs the same commands. A user-facing flow you add or change should have a
+browser test in `apps/web/e2e/sheets.e2e.ts` (helpers in `e2e/helpers.ts`). In addition:
 
 - **Tests:** new behaviour needs tests; bug fixes need a test that failed before the fix.
 - **Docs:** update docs in the same pull request as the code. That means

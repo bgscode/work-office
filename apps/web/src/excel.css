@@ -2088,3 +2088,50 @@ textarea.cell-editor {
 .xl-select.shape-font-size {
   width: 64px;
 }
+
+/* ---------------------------------------------------------------- crash screen */
+
+.crash-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: var(--xl-chrome);
+}
+
+.crash-card {
+  width: min(520px, calc(100vw - 32px));
+  padding: 24px 28px;
+  background: #fff;
+  border: 1px solid var(--xl-border-strong);
+  border-radius: 6px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+  font-size: 14px;
+}
+
+.crash-card h1 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.crash-card p {
+  line-height: 1.5;
+  color: var(--xl-muted);
+}
+
+.crash-actions {
+  display: flex;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.crash-card pre {
+  max-height: 200px;
+  overflow: auto;
+  padding: 8px;
+  background: var(--xl-chrome);
+  font-size: 11px;
+  white-space: pre-wrap;
+}

@@ -8,6 +8,7 @@ React UI (`apps/web`). Sheets is the active app; see docs/ROADMAP.md.
 - `pnpm dev` — build wasm (debug) and run the web app
 - `pnpm build:wasm` — rebuild the engine after Rust changes
 - `pnpm test` / `pnpm lint` / `pnpm typecheck` — must all pass before finishing
+- `pnpm e2e` — browser tests (Playwright) of the main flows
 
 ## Rules
 

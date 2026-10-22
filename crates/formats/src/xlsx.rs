@@ -26,7 +26,9 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
 
 use office_core::{OfficeError, Result};
-use sheets_engine::{Align, CellRef, ErrorKind, NumberFormat, Sheet, Style, VAlign, Value, Workbook};
+use sheets_engine::{
+    Align, CellRef, ErrorKind, NumberFormat, Sheet, Style, VAlign, Value, Workbook, MAX_COLS, MAX_ROWS,
+};
 use sheets_engine::{BorderLine, BorderStyle, Borders, Side};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
@@ -71,8 +73,19 @@ const NEWER_FUNCTIONS: &[&str] = &[
 // ---------------------------------------------------------------- reading
 
 pub fn read(bytes: &[u8]) -> Result<Workbook> {
-    let mut zip =
-        ZipArchive::new(Cursor::new(bytes)).map_err(|e| OfficeError::Parse(format!("not a zip file: {e}")))?;
+    // Excel 97-2003 .xls files and password-protected workbooks are OLE compound files.
+    if bytes.starts_with(&[0xD0, 0xCF, 0x11, 0xE0]) {
+        return Err(OfficeError::Parse(
+            "This is an Excel 97-2003 (.xls) or password-protected workbook, which can't be opened yet. \
+             Save it as an unprotected .xlsx in Excel and try again."
+                .into(),
+        ));
+    }
+    let mut zip = ZipArchive::new(Cursor::new(bytes)).map_err(|e| {
+        OfficeError::Parse(format!(
+            "This file isn't a valid .xlsx workbook. It may be damaged or saved in a different format. ({e})"
+        ))
+    })?;
 
     let workbook_path = part(&mut zip, "_rels/.rels")?
         .and_then(|xml| relationships(&xml).into_iter().find(|r| r.kind.ends_with("/officeDocument")))
@@ -274,7 +287,12 @@ fn sheet_data(xml: &str, shared: &SharedStrings, dxfs: &[sheets_engine::conditio
         match ev {
             XmlEvent::Start { name: "c", attrs } => {
                 let cell = CellRef::parse(&attr(attrs, "r")).unwrap_or(CellRef::new(row, next_col));
-                next_col = cell.col + 1;
+                next_col = cell.col.saturating_add(1);
+                // Damaged files can place cells past the end of the sheet; skip them.
+                if cell.row >= MAX_ROWS || cell.col >= MAX_COLS {
+                    at = None;
+                    return;
+                }
                 if let Ok(index) = attr(attrs, "s").parse::<usize>() {
                     if index > 0 {
                         out.styles.push((cell, index));
@@ -363,7 +381,7 @@ fn sheet_data(xml: &str, shared: &SharedStrings, dxfs: &[sheets_engine::conditio
                 }
                 next_col = 0;
             }
-            XmlEvent::End { name: "row" } => row += 1,
+            XmlEvent::End { name: "row" } => row = row.saturating_add(1),
             _ => {}
         }
         layout.event(ev);

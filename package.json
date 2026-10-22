@@ -10,6 +10,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "cargo test --workspace && pnpm -r test",
     "lint": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings",
-    "dev:debug": "pnpm build:wasm --dev && pnpm --filter @office/web dev"
+    "dev:debug": "pnpm build:wasm --dev && pnpm --filter @office/web dev",
+    "e2e": "pnpm --filter @office/web e2e"
   }
 }

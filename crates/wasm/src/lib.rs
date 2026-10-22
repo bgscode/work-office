@@ -126,7 +126,11 @@ impl SheetsDocument {
 
     #[wasm_bindgen(js_name = fromXlsx)]
     pub fn from_xlsx(bytes: &[u8]) -> Result<SheetsDocument, JsError> {
-        let book = office_formats::xlsx::read(bytes).map_err(|e| JsError::new(&e.to_string()))?;
+        // Readers write messages meant for people; show them without the "parse error:" prefix.
+        let book = office_formats::xlsx::read(bytes).map_err(|e| match e {
+            office_core::OfficeError::Parse(m) => JsError::new(&m),
+            other => JsError::new(&other.to_string()),
+        })?;
         Ok(Self::from_book(book))
     }
 
@@ -779,4 +783,46 @@ mod formatting_tests {
         assert!(!doc.sheet(0).style(CellRef::new(2, 2)).wrap);
         assert_eq!(doc.input(0, 2, 2), "");
     }
+}
+
+// ---------------------------------------------------------------- crashes
+
+thread_local! {
+    /// JavaScript callback that receives the message of a Rust panic.
+    static PANIC_HANDLER: std::cell::RefCell<Option<js_sys::Function>> = const { std::cell::RefCell::new(None) };
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console, js_name = error)]
+    fn console_error(message: &str);
+}
+
+/// Report Rust panics to JavaScript instead of failing silently: the message
+/// is logged with `console.error` and passed to `handler`. A panic leaves the
+/// engine unusable (later calls throw), so the UI shows its crash screen.
+/// Safe to call more than once; the latest handler wins.
+#[wasm_bindgen(js_name = installPanicHook)]
+pub fn install_panic_hook(handler: Option<js_sys::Function>) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    PANIC_HANDLER.with(|h| *h.borrow_mut() = handler);
+    ONCE.call_once(|| {
+        std::panic::set_hook(Box::new(|info| {
+            let message = format!("The spreadsheet engine crashed: {info}");
+            console_error(&message);
+            PANIC_HANDLER.with(|h| {
+                if let Ok(h) = h.try_borrow() {
+                    if let Some(f) = h.as_ref() {
+                        let _ = f.call1(&JsValue::NULL, &JsValue::from_str(&message));
+                    }
+                }
+            });
+        }));
+    });
+}
+
+/// Panic on purpose, so end-to-end tests can check that crashes are reported.
+#[wasm_bindgen(js_name = debugPanic)]
+pub fn debug_panic() {
+    panic!("debugPanic() was called");
 }

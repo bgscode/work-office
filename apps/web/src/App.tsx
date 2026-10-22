@@ -10,12 +10,19 @@ import { HomePage } from "./home/HomePage";
 import { navigate, useRoute } from "./router";
 import { SheetsLoader } from "./sheets/SheetsLoader";
 
+/**
+ * Files chosen on Home (or File > Open) waiting to be opened, by the new
+ * document's id. Not React state: navigating renders the new route right away
+ * (the hash change is handled as an urgent update), possibly before a state
+ * update made just before it, and the loader must see the file on its first
+ * render or it would open an empty workbook instead.
+ */
+const pendingFiles = new Map<string, File>();
+
 export function App() {
   const route = useRoute();
   const [engine, setEngine] = useState<"loading" | "ready" | Error>("loading");
   const [titleSlot, setTitleSlot] = useState<HTMLElement | null>(null);
-  /** A file chosen on Home (or File > Open) waiting to be opened in a new document. */
-  const [pendingFile, setPendingFile] = useState<{ docId: string; file: File } | null>(null);
 
   useEffect(() => {
     loadEngine().then(
@@ -34,7 +41,7 @@ export function App() {
   const openDocument = (doc: RecentDocument) => navigate(`/${doc.app}/${doc.id}`);
   function openFile(file: File) {
     const docId = newDocumentId();
-    setPendingFile({ docId, file });
+    pendingFiles.set(docId, file);
     navigate(`/sheets/${docId}`);
   }
 
@@ -53,8 +60,8 @@ export function App() {
           <SheetsLoader
             key={route.docId}
             docId={route.docId}
-            initialFile={pendingFile?.docId === route.docId ? pendingFile.file : undefined}
-            onInitialFileOpened={() => setPendingFile(null)}
+            initialFile={pendingFiles.get(route.docId)}
+            onInitialFileOpened={() => pendingFiles.delete(route.docId!)}
             onNewWorkbook={() => newDocument("sheets")}
             onOpenFile={openFile}
           />

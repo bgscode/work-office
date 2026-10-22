@@ -10,3 +10,7 @@ packages/engine/pkg/
 
 # Claude Code local data (agent worktrees)
 .claude/
+
+# Playwright
+apps/web/test-results/
+apps/web/playwright-report/
