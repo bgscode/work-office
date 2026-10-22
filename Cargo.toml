@@ -10,6 +10,9 @@ members = [
     "crates/wasm",
     "services/server",
 ]
+# The desktop app needs the platform's webview libraries, so it builds on its own
+# (apps/desktop: `pnpm --filter @office/desktop tauri build`).
+exclude = ["apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"

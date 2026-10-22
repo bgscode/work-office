@@ -1,4 +1,5 @@
 import { loadFileHandle, storeFileHandle } from "./documents";
+import { desktopFileName, desktopPathOf, desktopPickWorkbook, desktopSave, desktopSaveAs, isDesktop } from "./desktop";
 
 /** Ask the user for a file. Resolves to null if they cancel. */
 export function pickFile(accept: string): Promise<File | null> {
@@ -12,7 +13,17 @@ export function pickFile(accept: string): Promise<File | null> {
   });
 }
 
+/** File → Open / Home → Open: a workbook or text file (the native dialog in the desktop app). */
+export function pickWorkbook(): Promise<File | null> {
+  return isDesktop() ? desktopPickWorkbook() : pickFile(".xlsx,.csv,.tsv,.txt");
+}
+
 export function download(data: BlobPart, fileName: string, type: string) {
+  if (isDesktop()) {
+    // The desktop window has no downloads: ask where to save instead.
+    void new Blob([data]).arrayBuffer().then((buf) => desktopSaveAs(fileName, new Uint8Array(buf)));
+    return;
+  }
   const url = URL.createObjectURL(new Blob([data], { type }));
   const a = document.createElement("a");
   a.href = url;
@@ -36,11 +47,20 @@ type SavePicker = (opts: { suggestedName: string; types: { description: string; 
  * in IndexedDB (documents.ts), so this survives a reload. */
 const handles = new Map<string, WritableFile>();
 
+/** Desktop app: the file on disk each workbook was opened from or saved to (this session). */
+const desktopTargets = new Map<string, string>();
+
+/** A workbook was opened from `file`: in the desktop app, Save writes back to it (.xlsx only). */
+export function rememberOpenedFile(key: string, file: File) {
+  const path = desktopPathOf(file);
+  if (path && /\.xlsx$/i.test(path)) desktopTargets.set(key, path);
+}
+
 export type SaveResult = { kind: "saved"; name: string } | { kind: "downloaded" } | { kind: "cancelled" };
 
 /** True when Save writes straight to a file on disk (no download). */
 export function hasSaveTarget(key: string): boolean {
-  return handles.has(key);
+  return handles.has(key) || desktopTargets.has(key);
 }
 
 /**
@@ -48,6 +68,12 @@ export function hasSaveTarget(key: string): boolean {
  * download a copy where the browser can't write files.
  */
 export async function saveAs(key: string, data: BlobPart, fileName: string, mime: string, ext: string): Promise<SaveResult> {
+  if (isDesktop()) {
+    const path = await desktopSaveAs(fileName, new Uint8Array(await new Blob([data]).arrayBuffer()));
+    if (!path) return { kind: "cancelled" };
+    desktopTargets.set(key, path);
+    return { kind: "saved", name: desktopFileName(path) };
+  }
   const picker = (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker;
   if (!picker) {
     download(data, fileName, mime);
@@ -68,6 +94,18 @@ export async function saveAs(key: string, data: BlobPart, fileName: string, mime
 
 /** Save (Ctrl+S): write to the file from the last Save As, else Save As. */
 export async function save(key: string, data: BlobPart, fileName: string, mime: string, ext: string): Promise<SaveResult> {
+  const path = desktopTargets.get(key);
+  if (path) {
+    try {
+      await desktopSave(path, new Uint8Array(await new Blob([data]).arrayBuffer()));
+      return { kind: "saved", name: desktopFileName(path) };
+    } catch {
+      // Moved, deleted or read-only: ask where to save.
+      desktopTargets.delete(key);
+      return saveAs(key, data, fileName, mime, ext);
+    }
+  }
+  if (isDesktop()) return saveAs(key, data, fileName, mime, ext);
   const handle = handles.get(key) ?? (await restoreHandle(key));
   if (!handle) return saveAs(key, data, fileName, mime, ext);
   try {

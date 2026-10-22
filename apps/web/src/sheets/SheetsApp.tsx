@@ -6,7 +6,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { SheetsDocument, ValueKind, functionList, parseStyle, type FunctionInfo } from "@office/engine";
 import { Ribbon, type RibbonTab } from "@office/ui";
-import { download, hasSaveTarget, pickFile, save as saveFile, saveAs as saveFileAs } from "../files";
+import { download, hasSaveTarget, pickFile, pickWorkbook, save as saveFile, saveAs as saveFileAs } from "../files";
 import { PrintView } from "./print/PrintView";
 import { PageSetupDialog, type PageSetupTab } from "./print/PageSetupDialog";
 import { readPageSetup, updatePageSetup } from "./print/pageSetup";
@@ -1374,7 +1374,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
   };
 
   async function open() {
-    const file = await pickFile(".xlsx,.csv,.tsv,.txt");
+    const file = await pickWorkbook();
     if (file) onOpenFile(file);
   }
 

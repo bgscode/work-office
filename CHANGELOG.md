@@ -14,6 +14,8 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Added
 
+- Desktop app for macOS, Windows and Linux (`apps/desktop`, Tauri). It can be the default app for .xlsx, .csv and .tsv files: double-clicking a file opens it (in the running window if one is open), File → Open and Save As use the system dialogs, and Ctrl+S saves back to the opened .xlsx file. GitHub Actions builds the installers (.dmg, .exe/.msi, .AppImage/.deb/.rpm) for each version tag.
+
 - Notes: Review → New Note (Shift+F2) opens Excel's yellow note box beside the cell; cells with notes show a red triangle and their note on hover. Review → Delete, Previous Note, Next Note and Show All Notes; Home → Clear → Clear Notes; right-click → New/Edit/Delete Note. Notes move with their cells (insert, delete, sort) and are read from and saved to .xlsx (shown by Excel).
 - Hyperlinks: Insert → Link (Ctrl+K) to a web page, an e-mail address or a place in the workbook, with text to display and ScreenTip; the cell gets Excel's blue underlined link style. A click follows the link (click and hold selects the cell); right-click → Edit/Open/Remove Hyperlink; Home → Clear → Clear/Remove Hyperlinks. Saved in .xlsx. Script links (`javascript:`) never run.
 

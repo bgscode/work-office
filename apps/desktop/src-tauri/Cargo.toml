@@ -1,0 +1,28 @@
+[package]
+name = "work-office"
+version = "0.1.0"
+description = "Work Office: open-source spreadsheets that open and save Excel files"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Built on its own, not as part of the engine workspace (see the root Cargo.toml).
+[workspace]
+
+[lib]
+name = "work_office_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "s"
+strip = true

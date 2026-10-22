@@ -1,0 +1,62 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Work Office",
+  "version": "0.1.0",
+  "identifier": "com.bgscode.workoffice",
+  "build": {
+    "frontendDist": "../../web/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": { "script": "pnpm build:wasm && pnpm --filter @office/web dev", "cwd": "../..", "wait": false },
+    "beforeBuildCommand": { "script": "pnpm build:wasm && pnpm --filter @office/web build", "cwd": "../.." }
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Work Office",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 760,
+        "minHeight": 480,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "Open-source spreadsheets that open and save Excel files",
+    "longDescription": "Work Office is a free, open-source office suite. Sheets opens and saves .xlsx and .csv files with formulas, formatting, charts, filters and more.",
+    "license": "MIT OR Apache-2.0",
+    "homepage": "https://github.com/bgscode/work-office",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "fileAssociations": [
+      {
+        "ext": ["xlsx"],
+        "name": "Excel Workbook",
+        "description": "Excel Workbook",
+        "role": "Editor",
+        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      },
+      {
+        "ext": ["csv"],
+        "name": "CSV File",
+        "description": "Comma-separated values",
+        "role": "Editor",
+        "mimeType": "text/csv"
+      },
+      {
+        "ext": ["tsv"],
+        "name": "TSV File",
+        "description": "Tab-separated values",
+        "role": "Editor",
+        "mimeType": "text/tab-separated-values"
+      }
+    ],
+    "macOS": { "signingIdentity": "-", "minimumSystemVersion": "10.15" },
+    "linux": { "deb": { "section": "office" } }
+  }
+}

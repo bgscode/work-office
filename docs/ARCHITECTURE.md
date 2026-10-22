@@ -19,8 +19,16 @@ crates/collab                 real-time co-editing (planned)
 services/server               auth, storage, collaboration (planned)
 ```
 
-The desktop app (`apps/desktop`, planned) will wrap `apps/web` with Tauri and
-call the same Rust crates natively instead of through WebAssembly.
+The desktop app (`apps/desktop`) wraps the built `apps/web` with Tauri; the
+engine still runs as WebAssembly inside the window. `src-tauri/src/lib.rs` adds
+what a browser can't do: it registers as the app for .xlsx/.csv/.tsv, hands files
+the OS opens (macOS `RunEvent::Opened`, command-line arguments on Windows/Linux,
+forwarded to the running window by the single-instance plugin) to the page, and
+reads and writes files through native Open/Save dialogs. The page reaches these
+commands through `apps/web/src/desktop.ts` (`window.__TAURI__`), and may only touch
+files the user opened or picked. `.github/workflows/release.yml` builds the
+installers for a version tag. Calling the Rust crates natively instead of through
+WebAssembly is planned.
 
 ## App shell
 

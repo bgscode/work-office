@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { loadEngine } from "@office/engine";
 import { TitleBar } from "./chrome/TitleBar";
 import { TitleSlot } from "./chrome/titleSlot";
+import { isDesktop, onFilesOpened, takeOpenedFiles } from "./desktop";
 import { newDocumentId, type AppKind, type RecentDocument } from "./documents";
+import { rememberOpenedFile } from "./files";
 import { ComingSoon } from "./home/ComingSoon";
 import { HomePage } from "./home/HomePage";
 import { navigate, useRoute } from "./router";
@@ -42,8 +44,21 @@ export function App() {
   function openFile(file: File) {
     const docId = newDocumentId();
     pendingFiles.set(docId, file);
+    rememberOpenedFile(docId, file);
     navigate(`/sheets/${docId}`);
   }
+
+  // Desktop app: files double-clicked in Finder / Explorer, at launch and later.
+  useEffect(() => {
+    if (!isDesktop()) return;
+    const openAll = () =>
+      void takeOpenedFiles().then(
+        (files) => files.forEach(openFile),
+        (err) => console.error("Could not open the file", err),
+      );
+    openAll();
+    return onFilesOpened(openAll);
+  }, []);
 
   if (route.page === "home") {
     return <HomePage onOpenDocument={openDocument} onNew={newDocument} onOpenFile={openFile} />;

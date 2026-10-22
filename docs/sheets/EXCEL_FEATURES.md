@@ -167,7 +167,8 @@ When you finish an item, update its row in the same pull request.
 | Keyboard shortcuts help (Ctrl+/) | ⬜ | P2 | – |
 | Dark mode | ⬜ | P2 | – |
 | Hindi UI (and other languages) | ⬜ | P2 | – |
-| Desktop app (Tauri) | ⬜ | P2 | – |
+| Desktop app (Tauri) for macOS, Windows, Linux; opens .xlsx/.csv from Finder/Explorer, saves back | ✅ | P2 | D1 |
+| Signed installers, auto-update | ⬜ | P2 | – |
 | Touch / mobile | ⬜ | P2 | – |
 | Screen reader support | ⬜ | P2 | – |
 

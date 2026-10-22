@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { APPS, AppIcon } from "../chrome/AppIcon";
 import { listRecent, removeDocument, type AppKind, type RecentDocument } from "../documents";
-import { pickFile } from "../files";
+import { pickWorkbook } from "../files";
 
 interface Props {
   onOpenDocument: (doc: RecentDocument) => void;
@@ -56,7 +56,7 @@ export function HomePage({ onOpenDocument, onNew, onOpenFile }: Props) {
   );
 
   async function open() {
-    const file = await pickFile(".xlsx,.csv,.tsv,.txt");
+    const file = await pickWorkbook();
     if (file) onOpenFile(file);
   }
 

@@ -1,4 +1,4 @@
-# Office
+# Work Office
 
 An open-source office suite — **Sheets**, **Docs** and **Slides** — with a fast
 Rust engine that runs in the browser (WebAssembly) and on the desktop.
@@ -76,7 +76,29 @@ Opening the app shows a start page like Microsoft 365's: create a blank workbook
 | Double-click the fill handle | Fill down to the end of the neighbouring column |
 | Drag / double-click a column border | Resize / autofit a column |
 
-## Quick start
+## Install
+
+Download the installer for your computer from the
+[latest release](https://github.com/bgscode/work-office/releases/latest):
+
+| Computer | File |
+|---|---|
+| macOS (Apple silicon and Intel) | `Work.Office_<version>_universal.dmg`: open it and drag **Work Office** to Applications |
+| Windows 10/11 | `Work.Office_<version>_x64-setup.exe` (or the `.msi`) |
+| Linux | `.AppImage` (any distribution: make it executable and run), `.deb` (Ubuntu/Debian) or `.rpm` (Fedora) |
+
+The installers aren't signed by Apple or Microsoft yet, so the first launch needs one extra step:
+
+- **macOS:** right-click the app → **Open**. If macOS says the app is damaged, run
+  `xattr -cr "/Applications/Work Office.app"` in Terminal once.
+- **Windows:** in the SmartScreen prompt choose **More info → Run anyway**.
+
+**Make it the default app for spreadsheets:** on macOS, select any `.xlsx` file in Finder →
+**Get Info** (⌘I) → **Open with: Work Office** → **Change All…** (do the same for `.csv`).
+On Windows, right-click an `.xlsx` → **Open with → Choose another app → Work Office** →
+**Always**. Double-clicking a file then opens it in Work Office, and Ctrl+S / ⌘S saves back to it.
+
+## Quick start (developers)
 
 You need [Rust](https://rustup.rs), [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/),
 Node.js 20+ and [pnpm](https://pnpm.io) 10.
@@ -94,12 +116,18 @@ pnpm test         # Rust + TypeScript tests
 pnpm lint         # rustfmt + clippy
 pnpm typecheck
 pnpm build        # production build in apps/web/dist
+pnpm --filter @office/desktop tauri build   # desktop app for this computer (apps/desktop)
 ```
+
+The desktop app also needs the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
+for your system. Pushing a tag like `v0.2.0` builds the installers for every system on GitHub
+Actions and publishes them as a release (`.github/workflows/release.yml`).
 
 ## How it fits together
 
 ```
 apps/web            React UI: grid on <canvas>, formula bar, ribbon
+apps/desktop        Tauri desktop app (macOS, Windows, Linux) around apps/web
 packages/engine     TypeScript wrapper around the WebAssembly build
 crates/wasm         wasm-bindgen bindings (thin layer)
 crates/sheets-engine  cells, formulas, dependency graph, recalculation
