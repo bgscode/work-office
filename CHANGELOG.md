@@ -6,6 +6,24 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Added
 
+- Charts (M5): Insert → Charts (clustered/stacked/100% column and bar, line, line with markers, area, stacked area, pie, doughnut, scatter) from the selection or the table around the active cell; charts read their cells live and follow row/column changes; move, resize (Shift keeps the shape), nudge with arrows, delete, bring to front/send to back, all undoable. Chart Design tab: chart and axis titles, legend position, data labels, colour sets, switch row/column, select data, change chart type. Insert → Pictures. Big series draw one min/max per pixel, so 100,000-point charts stay fast. Charts and pictures are read from and saved to .xlsx.
+
+- One Excel-style dropdown (`Select`) everywhere instead of the browser's: ribbon, dialogs, status bar. Font, size and other dropdown lists open above the ribbon instead of being clipped. The duplicate "Paste special" box is gone (it is in the Paste menu, as in Excel), and the active ribbon tab has a single underline.
+
+- Data tools (M4): AutoFilter (Ctrl+Shift+L) with Excel's header dropdowns: value checklist with search, Text/Number Filters (custom conditions with wildcards), Top 10, above/below average, sort from the header, Clear and Reapply, blue row numbers and "N of M records found"; Custom Sort with several levels; Remove Duplicates; Data Validation (lists with an in-cell dropdown and Alt+↓, number/date/time/text-length limits, custom formulas, input messages, Stop/Warning/Information alerts, Circle Invalid Data); Conditional Formatting (highlight rules, top/bottom, above/below average, duplicates, dates, formulas, data bars, colour scales, Manage Rules). All saved in .xlsx. Enter after a run of Tab entries returns to the starting column, like Excel.
+
+- Formulas (M3): references to other sheets with workbook-wide recalculation, kept correct when sheets are renamed or deleted and when rows/columns move; pointing at cells on another sheet while typing a formula; whole column/row references (`A:A`, `1:1`) without per-cell cost; F4; volatile functions; `ROW`, `COLUMN`, `ROWS`, `COLUMNS`, `OFFSET`, `INDIRECT`, `ADDRESS`, `SUBTOTAL`, `AGGREGATE`, financial functions (`PMT`, `NPV`, `IRR`, `XIRR`, `RATE`…), percentiles and quartiles (158 functions). Date, time and loan functions get Excel's default number formats.
+
+- Performance: a 3-sheet × 100,000-row workbook (3M cells) opens in about 2.6 s in the browser instead of hanging; autosave no longer freezes (edits are journaled to IndexedDB in milliseconds); faster `.xlsx` reading and writing (single-pass zero-allocation XML reader, shared strings, typed loading). See docs/PERFORMANCE.md.
+
+- Grid layout: row heights (drag the row border, double-click to autofit, Row Height / Column Width dialogs in Excel's units), automatic row height for wrapped text and bigger fonts, hide/unhide rows and columns, Merge & Center / Across / Cells / Unmerge (selection and arrow keys treat merged cells as one), Freeze Panes (at selection, top row, first column). All saved in .xlsx.
+
+- Cell formatting: font family and size boxes, increase/decrease font size, Borders menu with Excel's presets, line styles and colours, Wrap Text, top/middle/bottom alignment, Format Painter; Alt+Enter turns on Wrap Text. All saved in .xlsx (fonts, borders, alignment).
+
+- Home page in the style of the Microsoft 365 start page: app rail, Start new tiles (blank workbook; document and presentation marked coming soon), open or drag-and-drop .xlsx/.csv, and Recent files with search and app filters. Every workbook is autosaved separately in the browser (up to 20) and listed in Recent. Apps open at `#/sheets/<id>`, so Back and refresh work. The title bar now has a Home button instead of the app switcher.
+
+- Excel look and feel: green title bar with file name, save status and Quick Access (save, undo, redo); ribbon with Excel's tabs and labelled groups, icons, split buttons, tooltips and collapse (Ctrl+F1); formula bar with Name Box dropdown, ✕/✓ and fx (Insert Function dialog); Excel grid defaults (64px columns, 20px rows, Calibri 11, green selection); Excel-style sheet tabs, status bar (mode, statistics, zoom slider), menus and dialogs.
+
 - Sheets: canvas grid with virtual scrolling, formula bar, multiple sheets, status bar (sum/count/average).
 - Sheets: formula engine with incremental recalculation, cycle detection and 46 functions.
 - Sheets: open/save `.xlsx` and `.csv`; copy/paste as tab-separated text; undo/redo.

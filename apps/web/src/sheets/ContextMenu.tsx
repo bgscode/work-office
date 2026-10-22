@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { Icon } from "@office/ui";
 
 export interface MenuItem {
   label: string;
@@ -6,6 +7,8 @@ export interface MenuItem {
   shortcut?: string;
   separatorBefore?: boolean;
   disabled?: boolean;
+  /** Icon name from @office/ui's icon set, or any element. */
+  icon?: ReactNode;
 }
 
 interface Props {
@@ -35,7 +38,7 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
   const left = Math.min(x, window.innerWidth - 240);
   const top = Math.min(y, window.innerHeight - items.length * 30 - 16);
   return (
-    <div ref={ref} className="context-menu" style={{ left, top }} role="menu">
+    <div ref={ref} className="context-menu office-menu" style={{ left, top }} role="menu">
       {items.map((item) => (
         <div key={item.label}>
           {item.separatorBefore && <hr />}
@@ -48,7 +51,8 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
               item.onRun();
             }}
           >
-            <span>{item.label}</span>
+            <span className="menu-icon">{typeof item.icon === "string" ? <Icon name={item.icon} /> : item.icon}</span>
+            <span className="menu-label">{item.label}</span>
             {item.shortcut && <kbd>{item.shortcut}</kbd>}
           </button>
         </div>

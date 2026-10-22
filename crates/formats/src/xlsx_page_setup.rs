@@ -27,12 +27,12 @@ pub(super) fn read_sheet(xml: &str) -> PageSetup {
     let mut in_text: Option<&'static str> = None;
     let on = |v: &str| v == "1" || v == "true";
     walk(xml, |ev| match ev {
-        XmlEvent::Start { name: "pageSetUpPr", attrs } => fit_to_page = on(attr(attrs, "fitToPage")),
+        XmlEvent::Start { name: "pageSetUpPr", attrs } => fit_to_page = on(&attr(attrs, "fitToPage")),
         XmlEvent::Start { name: "printOptions", attrs } => {
-            p.gridlines = on(attr(attrs, "gridLines"));
-            p.headings = on(attr(attrs, "headings"));
-            p.center_horizontally = on(attr(attrs, "horizontalCentered"));
-            p.center_vertically = on(attr(attrs, "verticalCentered"));
+            p.gridlines = on(&attr(attrs, "gridLines"));
+            p.headings = on(&attr(attrs, "headings"));
+            p.center_horizontally = on(&attr(attrs, "horizontalCentered"));
+            p.center_vertically = on(&attr(attrs, "verticalCentered"));
         }
         XmlEvent::Start { name: "pageMargins", attrs } => {
             let m = &mut p.margins;

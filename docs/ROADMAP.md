@@ -29,12 +29,14 @@ The detailed, feature-by-feature list (with priorities and milestones M1–M7) i
 - ✅ Find, sort, right-click menu, sheet rename/delete
 - ✅ 127 functions including `XLOOKUP`, `SUMIFS`, statistics, text, date & time
 - ✅ Autosave to browser storage
-- ⬜ Borders, font family/size, merged cells, wrap text, row heights
-- ⬜ Cross-sheet references (`Sheet2!A1`), whole-column references (`A:A`), named ranges
-- ⬜ Replace, filter, freeze panes, conditional formatting, data validation
-- ⬜ Financial functions, dynamic arrays (`FILTER`, `SORT`, `UNIQUE`)
-- ⬜ Charts
-- ⬜ Volatile functions (`TODAY`, `RAND`) refreshing on every recalculation
+- ✅ Borders, font family/size, merged cells, wrap text, row heights
+- ✅ Cross-sheet references (`Sheet2!A1`), whole-column references (`A:A`)
+- ⬜ Named ranges
+- ✅ Replace, filter, freeze panes, conditional formatting, data validation, remove duplicates, custom sort
+- ✅ Financial functions
+- ⬜ Dynamic arrays (`FILTER`, `SORT`, `UNIQUE`)
+- ✅ Charts (column, bar, line, area, pie, doughnut, scatter) and pictures
+- ✅ Volatile functions (`TODAY`, `RAND`) refreshing on every recalculation
 
 ## Phase 2 — Docs MVP
 

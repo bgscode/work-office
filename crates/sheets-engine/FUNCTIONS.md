@@ -200,6 +200,54 @@ value changes only when the cell or one of its inputs is edited.
 | `ISODD` | `ISODD(number)` |
 | `NA` | `NA()` |
 
+## Financial
+
+Money paid out is negative, money received positive (Excel's convention). `type` 0 = payments at period end (default), 1 = start.
+
+| Function | Syntax |
+|---|---|
+| `PMT` | `PMT(rate, nper, pv, [fv], [type])` |
+| `PPMT` | `PPMT(rate, per, nper, pv, [fv], [type])` |
+| `IPMT` | `IPMT(rate, per, nper, pv, [fv], [type])` |
+| `FV` | `FV(rate, nper, pmt, [pv], [type])` |
+| `PV` | `PV(rate, nper, pmt, [fv], [type])` |
+| `NPER` | `NPER(rate, pmt, pv, [fv], [type])` |
+| `RATE` | `RATE(nper, pmt, pv, [fv], [type], [guess])` |
+| `NPV` | `NPV(rate, value1, ...)` |
+| `XNPV` | `XNPV(rate, values, dates)` |
+| `IRR` | `IRR(values, [guess])` |
+| `XIRR` | `XIRR(values, dates, [guess])` |
+| `SLN` | `SLN(cost, salvage, life)` |
+| `DB` | `DB(cost, salvage, life, period, [month])` |
+| `DDB` | `DDB(cost, salvage, life, period, [factor])` |
+| `EFFECT` | `EFFECT(nominal_rate, npery)` |
+| `NOMINAL` | `NOMINAL(effect_rate, npery)` |
+
+## Reference
+
+| Function | Syntax | Notes |
+|---|---|---|
+| `ROW` | `ROW([reference])` | Without an argument: this cell's row |
+| `COLUMN` | `COLUMN([reference])` | Without an argument: this cell's column |
+| `ROWS` | `ROWS(array)` | |
+| `COLUMNS` | `COLUMNS(array)` | |
+| `ADDRESS` | `ADDRESS(row, column, [abs_num], [a1], [sheet_text])` | |
+| `OFFSET` | `OFFSET(reference, rows, cols, [height], [width])` | Volatile |
+| `INDIRECT` | `INDIRECT(ref_text, [a1])` | Volatile; A1 style |
+| `SUBTOTAL` | `SUBTOTAL(function_num, ref1, ...)` | Skips nested SUBTOTAL/AGGREGATE; 101–111 also skip hidden rows |
+| `AGGREGATE` | `AGGREGATE(function_num, options, ref1, ...)` | Functions 1–13 with options 0–7 |
+
+## Percentiles
+
+| Function | Syntax |
+|---|---|
+| `PERCENTILE` | `PERCENTILE(array, k)` |
+| `PERCENTILE.INC` | `PERCENTILE.INC(array, k)` |
+| `PERCENTILE.EXC` | `PERCENTILE.EXC(array, k)` |
+| `QUARTILE` | `QUARTILE(array, quart)` |
+| `QUARTILE.INC` | `QUARTILE.INC(array, quart)` |
+| `QUARTILE.EXC` | `QUARTILE.EXC(array, quart)` |
+
 ## Not yet supported
 
 Financial functions (`PMT`, `NPV`…), more statistics (`PERCENTILE`,

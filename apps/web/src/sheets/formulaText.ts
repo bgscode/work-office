@@ -5,28 +5,22 @@
 export interface RefMatch {
   start: number;
   end: number;
-  /** Zero-based, inclusive. */
+  /** Sheet named before `!` (unquoted), or undefined for the formula's own sheet. */
+  sheet?: string;
+  /** Zero-based, inclusive. Whole columns/rows span every row/column. */
   top: number;
   left: number;
   bottom: number;
   right: number;
 }
 
-const REF = /^\$?([A-Za-z]{1,3})\$?(\d+)$/;
+const MAX_ROW = 1_048_575;
+const MAX_COL = 16_383;
 
 function colIndex(letters: string): number {
   let n = 0;
   for (const ch of letters.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
   return n - 1;
-}
-
-function parseRef(text: string): { row: number; col: number } | null {
-  const m = REF.exec(text);
-  if (!m) return null;
-  const row = Number(m[2]) - 1;
-  const col = colIndex(m[1]);
-  if (row < 0 || row >= 1_048_576 || col >= 16_384) return null;
-  return { row, col };
 }
 
 /** Positions outside string literals. */
@@ -44,31 +38,113 @@ function codeMask(formula: string): boolean[] {
   return mask;
 }
 
-/** Every cell reference or range in a formula (including the leading "="). */
+// Pieces of a reference, matched at a fixed position (sticky regexes).
+const QUOTED_SHEET = /'((?:[^']|'')+)'!/y;
+const PLAIN_SHEET = /([A-Za-z_\u0080-\uffff][A-Za-z0-9_.\u0080-\uffff]*)!/y;
+const CELL_RANGE = /\$?([A-Za-z]{1,3})\$?(\d+)(?::\$?([A-Za-z]{1,3})\$?(\d+))?/y;
+const COL_RANGE = /\$?([A-Za-z]{1,3}):\$?([A-Za-z]{1,3})(?![A-Za-z0-9])/y;
+const ROW_RANGE = /\$?(\d+):\$?(\d+)(?![0-9.])/y;
+const IDENT = /[A-Za-z0-9_.$]/;
+
+function stickyAt(re: RegExp, text: string, i: number): RegExpExecArray | null {
+  re.lastIndex = i;
+  return re.exec(text);
+}
+
+/**
+ * Every reference in a formula (including the leading "="): cells and ranges
+ * (`A1`, `$B$2:C9`), whole columns and rows (`A:A`, `3:5`), with an optional
+ * sheet (`Sheet2!A1`, `'My Sheet'!B:B`). Skips strings and function names.
+ */
 export function findRefs(formula: string): RefMatch[] {
   if (!formula.startsWith("=")) return [];
   const mask = codeMask(formula);
   const out: RefMatch[] = [];
-  const word = /[A-Za-z_$][A-Za-z0-9_$.]*(?::[A-Za-z_$][A-Za-z0-9_$.]*)?/g;
-  for (let m = word.exec(formula); m; m = word.exec(formula)) {
-    const start = m.index;
-    const end = start + m[0].length;
-    if (!mask[start] || /[A-Za-z0-9_.]/.test(formula[start - 1] ?? "")) continue;
-    if (/^\s*\(/.test(formula.slice(end))) continue; // function name
-    const [a, b] = m[0].split(":");
-    const ra = parseRef(a);
-    const rb = b === undefined ? ra : parseRef(b);
-    if (!ra || !rb) continue;
-    out.push({
-      start,
-      end,
-      top: Math.min(ra.row, rb.row),
-      left: Math.min(ra.col, rb.col),
-      bottom: Math.max(ra.row, rb.row),
-      right: Math.max(ra.col, rb.col),
-    });
+  let i = 1;
+  while (i < formula.length) {
+    if (!mask[i] || IDENT.test(formula[i - 1] ?? "") || formula[i - 1] === "'") {
+      i++;
+      continue;
+    }
+    const start = i;
+    let sheet: string | undefined;
+    let at = i;
+    const quoted = stickyAt(QUOTED_SHEET, formula, at);
+    const plain = quoted ? null : stickyAt(PLAIN_SHEET, formula, at);
+    if (quoted) {
+      sheet = quoted[1].replace(/''/g, "'");
+      at += quoted[0].length;
+    } else if (plain) {
+      sheet = plain[1];
+      at += plain[0].length;
+    }
+    const cell = stickyAt(CELL_RANGE, formula, at);
+    const cols = cell ? null : stickyAt(COL_RANGE, formula, at);
+    const rows = cell || cols ? null : stickyAt(ROW_RANGE, formula, at);
+    const m = cell ?? cols ?? rows;
+    const end = m ? at + m[0].length : at;
+    // Not a reference, or the name of a function (followed by "(") or a longer word.
+    if (!m || IDENT.test(formula[end] ?? "") || /^\s*\(/.test(formula.slice(end))) {
+      i = Math.max(i + 1, sheet ? at : i + 1);
+      continue;
+    }
+    let top: number, left: number, bottom: number, right: number;
+    if (cell) {
+      const r1 = Number(cell[2]) - 1;
+      const c1 = colIndex(cell[1]);
+      const r2 = cell[4] ? Number(cell[4]) - 1 : r1;
+      const c2 = cell[3] ? colIndex(cell[3]) : c1;
+      [top, bottom, left, right] = [Math.min(r1, r2), Math.max(r1, r2), Math.min(c1, c2), Math.max(c1, c2)];
+    } else if (cols) {
+      const c1 = colIndex(cols[1]);
+      const c2 = colIndex(cols[2]);
+      [top, bottom, left, right] = [0, MAX_ROW, Math.min(c1, c2), Math.max(c1, c2)];
+    } else {
+      const r1 = Number(rows![1]) - 1;
+      const r2 = Number(rows![2]) - 1;
+      [top, bottom, left, right] = [Math.min(r1, r2), Math.max(r1, r2), 0, MAX_COL];
+    }
+    if (top < 0 || bottom > MAX_ROW || left < 0 || right > MAX_COL) {
+      i = end;
+      continue;
+    }
+    out.push({ start, end, sheet, top, left, bottom, right });
+    i = end;
   }
   return out;
+}
+
+/** References that point at the sheet being viewed (for coloured highlights). */
+export function refsOnSheet(refs: RefMatch[], viewed: string, editedOn: string): RefMatch[] {
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  return refs.filter((r) => (r.sheet === undefined ? same(viewed, editedOn) : same(r.sheet, viewed)));
+}
+
+/**
+ * F4: cycle the reference at (or just before) the caret through
+ * `$A$1` → `A$1` → `$A1` → `A1` → `$A$1`. Returns the new formula and caret,
+ * or null when the caret isn't on a reference.
+ */
+export function cycleReference(formula: string, caret: number): { formula: string; caret: number } | null {
+  const ref = findRefs(formula).find((r) => caret >= r.start && caret <= r.end);
+  if (!ref) return null;
+  const text = formula.slice(ref.start, ref.end);
+  const bang = text.lastIndexOf("!");
+  const prefix = bang >= 0 ? text.slice(0, bang + 1) : "";
+  const body = bang >= 0 ? text.slice(bang + 1) : text;
+  const parts = body.split(":").map((p) => {
+    const m = /^(\$?)([A-Za-z]*)(\$?)(\d*)$/.exec(p);
+    return m ? { col: m[2], row: m[4], absCol: m[1] === "$", absRow: m[3] === "$" } : null;
+  });
+  if (parts.some((p) => !p)) return null;
+  const first = parts[0]!;
+  // Next state from the first part: both → row only → column only → none → both.
+  const [absCol, absRow] =
+    first.absCol && first.absRow ? [false, true] : !first.absCol && first.absRow ? [true, false] : first.absCol ? [false, false] : [true, true];
+  const write = (p: { col: string; row: string }) =>
+    `${p.col ? (absCol ? "$" : "") + p.col : ""}${p.row ? (absRow ? "$" : "") + p.row : ""}`;
+  const next = prefix + parts.map((p) => write(p!)).join(":");
+  return { formula: formula.slice(0, ref.start) + next + formula.slice(ref.end), caret: ref.start + next.length };
 }
 
 /** The function-name prefix being typed at `caret`, e.g. "VLO" in "=SUM(1)+VLO". */

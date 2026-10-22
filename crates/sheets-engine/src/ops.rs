@@ -4,6 +4,7 @@
 use office_core::Op;
 
 use crate::cell::CellRef;
+use crate::formula::refs;
 use crate::sheet::Sheet;
 use crate::style::Style;
 use crate::workbook::{Workbook, Worksheet};
@@ -17,8 +18,8 @@ pub struct SetCells {
 
 impl Op<Workbook> for SetCells {
     fn apply(&self, doc: &mut Workbook) {
-        if let Some(ws) = doc.sheets.get_mut(self.sheet) {
-            ws.sheet.set_inputs(self.edits.iter().cloned());
+        if self.sheet < doc.sheets.len() {
+            doc.set_inputs(self.sheet, self.edits.iter().cloned());
         }
     }
 
@@ -89,6 +90,15 @@ impl Op<Workbook> for SetColWidths {
 pub struct ReplaceSheet {
     pub sheet: usize,
     pub with: Box<Sheet>,
+    /// New inputs for formulas on other sheets that point at this one (rows or
+    /// columns moved), applied in the same undo step.
+    pub links: Vec<(usize, Vec<(CellRef, String)>)>,
+}
+
+impl ReplaceSheet {
+    pub fn new(sheet: usize, with: Sheet) -> Self {
+        ReplaceSheet { sheet, with: Box::new(with), links: Vec::new() }
+    }
 }
 
 impl Op<Workbook> for ReplaceSheet {
@@ -96,10 +106,18 @@ impl Op<Workbook> for ReplaceSheet {
         if let Some(ws) = doc.sheets.get_mut(self.sheet) {
             ws.sheet = (*self.with).clone();
         }
+        for (s, edits) in &self.links {
+            doc.set_inputs(*s, edits.iter().cloned());
+        }
+        doc.recalc_links();
     }
 
     fn invert(&self, doc: &Workbook) -> Box<dyn Op<Workbook>> {
-        Box::new(ReplaceSheet { sheet: self.sheet, with: Box::new(doc.sheets[self.sheet].sheet.clone()) })
+        Box::new(ReplaceSheet {
+            sheet: self.sheet,
+            with: Box::new(doc.sheets[self.sheet].sheet.clone()),
+            links: doc.inputs_before(&self.links),
+        })
     }
 }
 
@@ -113,6 +131,7 @@ pub struct InsertSheet {
 impl Op<Workbook> for InsertSheet {
     fn apply(&self, doc: &mut Workbook) {
         doc.sheets.insert(self.index.min(doc.sheets.len()), self.sheet.clone());
+        doc.recalc_links();
     }
 
     fn invert(&self, _doc: &Workbook) -> Box<dyn Op<Workbook>> {
@@ -127,14 +146,31 @@ pub struct RemoveSheet {
 }
 
 impl Op<Workbook> for RemoveSheet {
+    /// Removes the sheet; references to it elsewhere become `#REF!`, as in Excel.
     fn apply(&self, doc: &mut Workbook) {
-        if self.index < doc.sheets.len() {
-            doc.sheets.remove(self.index);
+        if self.index >= doc.sheets.len() {
+            return;
         }
+        let name = doc.sheets.remove(self.index).name;
+        for (s, edits) in doc.link_edits(None, |input| refs::delete_sheet_input(input, &name)) {
+            doc.set_inputs(s, edits);
+        }
+        doc.recalc_links();
     }
 
+    /// Undo puts the sheet back and restores the formulas that became `#REF!`.
     fn invert(&self, doc: &Workbook) -> Box<dyn Op<Workbook>> {
-        Box::new(InsertSheet { index: self.index, sheet: doc.sheets[self.index].clone() })
+        let name = doc.sheets[self.index].name.clone();
+        let changed = doc.link_edits(Some(self.index), |input| refs::delete_sheet_input(input, &name));
+        let restore: Vec<Box<dyn Op<Workbook>>> = doc
+            .inputs_before(&changed)
+            .into_iter()
+            .map(|(s, edits)| Box::new(SetCells { sheet: s, edits }) as Box<dyn Op<Workbook>>)
+            .collect();
+        let mut ops: Vec<Box<dyn Op<Workbook>>> =
+            vec![Box::new(InsertSheet { index: self.index, sheet: doc.sheets[self.index].clone() })];
+        ops.extend(restore);
+        Box::new(Sequence(ops))
     }
 }
 
@@ -145,10 +181,14 @@ pub struct RenameSheet {
 }
 
 impl Op<Workbook> for RenameSheet {
+    /// Renames the sheet and rewrites formulas that point at it, as Excel does.
     fn apply(&self, doc: &mut Workbook) {
-        if let Some(ws) = doc.sheets.get_mut(self.index) {
-            ws.name = self.name.clone();
+        let Some(ws) = doc.sheets.get_mut(self.index) else { return };
+        let old = std::mem::replace(&mut ws.name, self.name.clone());
+        for (s, edits) in doc.link_edits(None, |input| refs::rename_sheet_input(input, &old, &self.name)) {
+            doc.set_inputs(s, edits);
         }
+        doc.recalc_links();
     }
 
     fn invert(&self, doc: &Workbook) -> Box<dyn Op<Workbook>> {
@@ -170,6 +210,31 @@ impl Op<Workbook> for Batch {
 
     fn invert(&self, doc: &Workbook) -> Box<dyn Op<Workbook>> {
         Box::new(Batch(self.0.iter().rev().map(|op| op.invert(doc)).collect()))
+    }
+}
+
+/// Ops applied in order, undone in reverse. Unlike `Batch`, each inverse is
+/// computed when needed, so later ops may depend on earlier ones (an inserted
+/// sheet, then its restored formulas).
+pub struct Sequence(pub Vec<Box<dyn Op<Workbook>>>);
+
+impl Op<Workbook> for Sequence {
+    fn apply(&self, doc: &mut Workbook) {
+        for op in &self.0 {
+            op.apply(doc);
+        }
+    }
+
+    fn invert(&self, doc: &Workbook) -> Box<dyn Op<Workbook>> {
+        // Inverting step by step needs the intermediate states.
+        let mut scratch = doc.clone();
+        let mut inverses = Vec::new();
+        for op in &self.0 {
+            inverses.push(op.invert(&scratch));
+            op.apply(&mut scratch);
+        }
+        inverses.reverse();
+        Box::new(Sequence(inverses))
     }
 }
 
@@ -203,6 +268,32 @@ mod tests {
     }
 
     #[test]
+    fn renaming_and_removing_sheets_rewrites_formulas() {
+        let a1 = CellRef::new(0, 0);
+        let mut wb = Workbook::new();
+        let data = wb.add_sheet();
+        wb.sheets[data].name = "Data".into();
+        wb.set_inputs(data, [(a1, "5".to_string())]);
+        wb.set_inputs(0, [(a1, "=Data!A1*2".to_string())]);
+        let mut history = History::default();
+
+        history.apply(&mut wb, Box::new(RenameSheet { index: data, name: "My Data".into() }));
+        assert_eq!(wb.sheets[0].sheet.input(a1), "='My Data'!A1*2");
+        assert_eq!(wb.sheets[0].sheet.value(a1), &Value::Number(10.0));
+        history.undo(&mut wb);
+        assert_eq!(wb.sheets[0].sheet.input(a1), "=Data!A1*2");
+
+        history.apply(&mut wb, Box::new(RemoveSheet { index: data }));
+        assert_eq!(wb.sheets.len(), 1);
+        assert_eq!(wb.sheets[0].sheet.input(a1), "=#REF!*2");
+        assert_eq!(wb.sheets[0].sheet.value(a1), &Value::Error(crate::ErrorKind::Ref));
+        history.undo(&mut wb);
+        assert_eq!(wb.sheets.len(), 2);
+        assert_eq!(wb.sheets[0].sheet.input(a1), "=Data!A1*2");
+        assert_eq!(wb.sheets[0].sheet.value(a1), &Value::Number(10.0));
+    }
+
+    #[test]
     fn structural_ops_undo() {
         let mut wb = Workbook::new();
         let mut history = History::default();
@@ -217,7 +308,7 @@ mod tests {
             ])),
         );
         let inserted = wb.sheets[0].sheet.with_inserted(crate::formula::refs::Axis::Row, 0, 1);
-        history.apply(&mut wb, Box::new(ReplaceSheet { sheet: 0, with: Box::new(inserted) }));
+        history.apply(&mut wb, Box::new(ReplaceSheet::new(0, inserted)));
         assert_eq!(wb.sheets[0].sheet.input(CellRef::new(1, 0)), "x");
         assert_eq!(wb.sheets[0].sheet.style(CellRef::new(1, 0)), &bold);
 

@@ -1,4 +1,6 @@
-//! Cell formatting: font, colours, alignment and number format.
+//! Cell formatting: font, colours, alignment, borders and number format.
+
+pub use crate::borders::{BorderLine, BorderStyle, Borders, Side};
 
 /// Formatting of one cell. `Style::default()` is an unformatted cell.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
@@ -14,6 +16,16 @@ pub struct Style {
     /// `None` means automatic: numbers right, text left, booleans and errors centred.
     pub align: Option<Align>,
     pub number_format: NumberFormat,
+    /// Font family, e.g. "Arial". `None` is the workbook default (Calibri).
+    pub font: Option<String>,
+    /// Font size in tenths of a point (`110` = 11 pt). `None` is the default, 11 pt.
+    pub font_size: Option<u16>,
+    /// Wrap text onto several lines inside the cell (Excel's "Wrap Text").
+    pub wrap: bool,
+    /// Vertical alignment; Excel's default is bottom.
+    pub valign: VAlign,
+    /// Lines drawn on the cell's edges (see `borders.rs`).
+    pub borders: Borders,
 }
 
 impl Style {
@@ -34,6 +46,14 @@ impl Style {
             StylePatch::Align(a) => s.align = *a,
             StylePatch::NumberFormat(nf) => s.number_format = nf.clone(),
             StylePatch::Decimals(delta) => s.number_format = s.number_format.with_decimals_changed(*delta),
+            StylePatch::Font(name) => s.font = name.clone().filter(|n| !n.is_empty() && n != DEFAULT_FONT),
+            StylePatch::FontSize(size) => s.font_size = size.map(clamp_font_size).filter(|t| *t != DEFAULT_FONT_SIZE),
+            StylePatch::FontSizeStep(up) => {
+                let next = step_font_size(s.font_size.unwrap_or(DEFAULT_FONT_SIZE), *up);
+                s.font_size = Some(next).filter(|t| *t != DEFAULT_FONT_SIZE);
+            }
+            StylePatch::Wrap(on) => s.wrap = *on,
+            StylePatch::VAlign(v) => s.valign = *v,
             StylePatch::Clear => s = Style::default(),
         }
         s
@@ -53,7 +73,50 @@ pub enum StylePatch {
     NumberFormat(NumberFormat),
     /// Add or remove decimal places (the ".0" / ".00" buttons).
     Decimals(i8),
+    /// Font family; `None` resets to the default font.
+    Font(Option<String>),
+    /// Font size in tenths of a point; `None` resets to 11 pt.
+    FontSize(Option<u16>),
+    /// Excel's "Increase Font Size" (`true`) / "Decrease Font Size" (`false`) buttons.
+    FontSizeStep(bool),
+    Wrap(bool),
+    VAlign(VAlign),
     Clear,
+}
+
+/// Excel's default font for new workbooks.
+pub const DEFAULT_FONT: &str = "Calibri";
+/// 11 pt, in tenths of a point.
+pub const DEFAULT_FONT_SIZE: u16 = 110;
+/// The sizes Excel's font-size box lists, in tenths of a point.
+pub const FONT_SIZES: [u16; 17] = [80, 90, 100, 105, 110, 120, 140, 160, 180, 200, 220, 240, 260, 280, 360, 480, 720];
+
+/// Excel accepts font sizes from 1 to 409 pt.
+fn clamp_font_size(tenths: u16) -> u16 {
+    tenths.clamp(10, 4090)
+}
+
+/// The next size up or down, like Excel's Increase/Decrease Font Size buttons:
+/// through the standard list (without 10.5), then in 10 pt steps above 72 and
+/// 1 pt steps below 8.
+pub fn step_font_size(tenths: u16, up: bool) -> u16 {
+    let steps = || FONT_SIZES.iter().copied().filter(|t| *t != 105);
+    let next = if up {
+        steps().find(|t| *t > tenths).unwrap_or((tenths / 100 + 1) * 100)
+    } else if tenths > 720 {
+        (tenths.div_ceil(100) * 100 - 100).max(720)
+    } else {
+        steps().rfind(|t| *t < tenths).unwrap_or(tenths.div_ceil(10).saturating_sub(1) * 10)
+    };
+    clamp_font_size(next)
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum VAlign {
+    Top,
+    Center,
+    #[default]
+    Bottom,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -175,6 +238,49 @@ mod tests {
         let s = s.patched(&StylePatch::Decimals(-5));
         assert_eq!(s.number_format, NumberFormat::Number { decimals: 0, thousands: false });
         assert!(s.patched(&StylePatch::Clear).is_default());
+    }
+
+    #[test]
+    fn font_patches_normalise_defaults() {
+        let s =
+            Style::default().patched(&StylePatch::Font(Some("Arial".into()))).patched(&StylePatch::FontSize(Some(140)));
+        assert_eq!(s.font.as_deref(), Some("Arial"));
+        assert_eq!(s.font_size, Some(140));
+        // Choosing Calibri 11 again is the same as the default.
+        let s = s.patched(&StylePatch::Font(Some("Calibri".into()))).patched(&StylePatch::FontSize(Some(110)));
+        assert!(s.is_default());
+        assert_eq!(Style::default().patched(&StylePatch::FontSize(Some(5000))).font_size, Some(4090));
+    }
+
+    #[test]
+    fn font_size_steps_like_excel() {
+        let up = |t| step_font_size(t, true);
+        let down = |t| step_font_size(t, false);
+        assert_eq!(up(110), 120);
+        assert_eq!(up(100), 110); // skips 10.5
+        assert_eq!(up(105), 110);
+        assert_eq!(up(130), 140);
+        assert_eq!(up(720), 800);
+        assert_eq!(up(800), 900);
+        assert_eq!(down(110), 100);
+        assert_eq!(down(80), 70);
+        assert_eq!(down(75), 70);
+        assert_eq!(down(10), 10);
+        assert_eq!(down(900), 800);
+        assert_eq!(down(800), 720);
+        assert_eq!(down(750), 720);
+        let s = Style::default().patched(&StylePatch::FontSizeStep(true));
+        assert_eq!(s.font_size, Some(120));
+        assert!(s.patched(&StylePatch::FontSizeStep(false)).is_default());
+    }
+
+    #[test]
+    fn wrap_and_vertical_alignment() {
+        let s = Style::default().patched(&StylePatch::Wrap(true)).patched(&StylePatch::VAlign(VAlign::Top));
+        assert!(s.wrap);
+        assert_eq!(s.valign, VAlign::Top);
+        let s = s.patched(&StylePatch::Wrap(false)).patched(&StylePatch::VAlign(VAlign::Bottom));
+        assert!(s.is_default());
     }
 
     #[test]

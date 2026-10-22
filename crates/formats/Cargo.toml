@@ -8,4 +8,5 @@ license.workspace = true
 office-core = { workspace = true }
 sheets-engine = { workspace = true }
 quick-xml = { workspace = true }
+rustc-hash = { workspace = true }
 zip = { workspace = true }

@@ -40,7 +40,7 @@ When you finish an item, update its row in the same pull request.
 
 | Feature | Status | Priority | Milestone |
 |---|---|---|---|
-| Arrows, Shift+arrows, Page Up/Down, Home, Tab/Enter | ✅ | P1 | – |
+| Arrows, Shift+arrows, Page Up/Down, Home, Tab/Enter (Enter after Tabs returns to the first column, like Excel) | ✅ | P1 | – |
 | Click/drag select; whole row/column/sheet select | ✅ | P1 | – |
 | Ctrl+arrow (jump to edge of data), Ctrl+Shift+arrow (select to edge) | ✅ | P1 | M1 |
 | Ctrl+Home / Ctrl+End | ✅ | P1 | M1 |
@@ -58,16 +58,17 @@ When you finish an item, update its row in the same pull request.
 | Horizontal alignment | ✅ | P1 | – |
 | Number formats: number, ₹/$ currency, %, date, time, text; decimals ± | ✅ | P1 | – |
 | Column width: drag, autofit | ✅ | P1 | – |
-| Font family and font size | ⬜ | P1 | M2 |
-| Borders (all, outer, bottom, thick, colours) | ⬜ | P1 | M2 |
-| Merge & centre / unmerge | ⬜ | P1 | M2 |
-| Wrap text (cells with Alt+Enter line breaks show on one line until then) | ⬜ | P1 | M2 |
-| Vertical alignment (top / middle / bottom) | ⬜ | P1 | M2 |
-| Row height: drag, autofit | ⬜ | P1 | M2 |
-| Hide / unhide rows and columns | ⬜ | P1 | M2 |
-| Format Painter | ⬜ | P1 | M2 |
-| Conditional formatting: highlight rules (>, <, between, equal, text contains, duplicates) | ⬜ | P1 | M4 |
-| Conditional formatting: colour scales, data bars, icon sets | ⬜ | P2 | – |
+| Font family and font size (incl. Hindi fonts Mangal / Nirmala UI), increase/decrease size | ✅ | P1 | M2 |
+| Borders (Excel's presets, line styles, line colours) | ✅ | P1 | M2 |
+| Merge & Center, Merge Across, Merge Cells, Unmerge | ✅ | P1 | M2 |
+| Wrap text (rows grow to fit, like Excel's automatic row height) | ✅ | P1 | M2 |
+| Vertical alignment (top / middle / bottom) | ✅ | P1 | M2 |
+| Row height: drag, double-click to autofit, Row Height dialog (points); automatic height for big fonts and wrapped text | ✅ | P1 | M2 |
+| Hide / unhide rows and columns | ✅ | P1 | M2 |
+| Format Painter (click once, double-click to keep painting, Esc to stop) | ✅ | P1 | M2 |
+| Conditional formatting: highlight rules (>, <, between, equal, text contains, date occurring, duplicates, top/bottom, above/below average, formula), Manage Rules | ✅ | P1 | M4 |
+| Conditional formatting: colour scales, data bars | ✅ | P2 | M4 |
+| Conditional formatting: icon sets, custom format picker | ⬜ | P2 | – |
 | Format as Table (banded rows, header style) | ⬜ | P2 | – |
 | Custom number format codes (`0.0"kg"`, `[Red]`…) | ⬜ | P2 | – |
 | Accounting, fraction, scientific formats | ⬜ | P2 | – |
@@ -79,15 +80,15 @@ When you finish an item, update its row in the same pull request.
 | Feature | Status | Priority | Milestone |
 |---|---|---|---|
 | Formula engine, operators, error values, incremental recalculation, cycle detection | ✅ | P1 | – |
-| 127 functions: math, statistics, text, logical, lookup (`XLOOKUP`…), date & time, `SUMIFS` family | ✅ | P1 | – |
+| 158 functions: math, statistics, text, logical, lookup (`XLOOKUP`…), date & time, financial, reference, `SUMIFS` family | ✅ | P1 | – |
 | Autocomplete, syntax hints, click/arrow references with colour highlights | ✅ | P1 | – |
 | References rewritten on insert/delete/sort/copy | ✅ | P1 | – |
-| References to other sheets (`Sheet2!A1`, `'My Sheet'!A1:B5`) | ⬜ | P1 | M3 |
-| Whole column / row references (`A:A`, `1:1`) | ⬜ | P1 | M3 |
-| F4 to cycle `$A$1` → `A$1` → `$A1` → `A1` while editing | ⬜ | P1 | M3 |
-| `TODAY`, `NOW`, `RAND` refresh on every recalculation (volatile functions) | ⬜ | P1 | M3 |
-| `SUBTOTAL`, `AGGREGATE`, `ROW`, `COLUMN`, `ROWS`, `COLUMNS` | ⬜ | P1 | M3 |
-| Financial functions: `PMT`, `FV`, `PV`, `NPV`, `IRR`, `RATE`, `NPER` | ⬜ | P1 | M3 |
+| References to other sheets (`Sheet2!A1`, `'My Sheet'!A1:B5`), updated on rename/delete; click another sheet while typing a formula | ✅ | P1 | M3 |
+| Whole column / row references (`A:A`, `1:1`), cheap to recalculate | ✅ | P1 | M3 |
+| F4 to cycle `$A$1` → `A$1` → `$A1` → `A1` while editing | ✅ | P1 | M3 |
+| `TODAY`, `NOW`, `RAND`, `OFFSET`, `INDIRECT` recalculate on every change (volatile) | ✅ | P1 | M3 |
+| `SUBTOTAL`, `AGGREGATE`, `ROW`, `COLUMN`, `ROWS`, `COLUMNS`, `OFFSET`, `INDIRECT`, `ADDRESS` | ✅ | P1 | M3 |
+| Financial functions: `PMT`, `FV`, `PV`, `NPV`, `XNPV`, `IRR`, `XIRR`, `RATE`, `NPER`, `IPMT`, `PPMT`, `SLN`, `DB`, `DDB`, `EFFECT`, `NOMINAL` | ✅ | P1 | M3 |
 | Named ranges (Name Manager, use names in formulas) | ⬜ | P2 | – |
 | Dynamic arrays that spill: `FILTER`, `SORT`, `UNIQUE`, `SEQUENCE` | ⬜ | P2 | – |
 | Show formulas (Ctrl+`) | ⬜ | P2 | – |
@@ -100,10 +101,11 @@ When you finish an item, update its row in the same pull request.
 | Feature | Status | Priority | Milestone |
 |---|---|---|---|
 | Sort by one column, A→Z / Z→A | ✅ | P1 | – |
-| Freeze panes (top row, first column, at selection) | ⬜ | P1 | M4 |
-| Filter (AutoFilter dropdowns: by value, text/number conditions, sort from header) | ⬜ | P1 | M4 |
-| Data validation: dropdown lists, number/date limits, error message | ⬜ | P1 | M4 |
-| Remove duplicates | ⬜ | P1 | M4 |
+| Freeze panes (top row, first column, at selection) | ✅ | P1 | M4 |
+| Filter (AutoFilter dropdowns: by value with search, text/number conditions, top 10, above/below average, sort from header, Ctrl+Shift+L, Clear/Reapply, "N of M records found") | ✅ | P1 | M4 |
+| Data validation: dropdown lists (Alt+↓), number/date/time/text-length limits, custom formula, input message, Stop/Warning/Information alerts, Circle Invalid Data | ✅ | P1 | M4 |
+| Remove duplicates | ✅ | P1 | M4 |
+| Custom Sort dialog (several levels, headers) | ✅ | P1 | M4 |
 | Sort by several columns, sort with header row option | ⬜ | P2 | – |
 | Text to Columns | ⬜ | P2 | – |
 | Pivot tables | ⬜ | P2 | – |
@@ -116,9 +118,10 @@ When you finish an item, update its row in the same pull request.
 
 | Feature | Status | Priority | Milestone |
 |---|---|---|---|
-| Charts: column, bar, line, pie (insert from selection, move, resize, title, legend) | ⬜ | P1 | M5 |
-| Charts: area, scatter, combo; axis and series formatting | ⬜ | P2 | – |
-| Insert images | ⬜ | P2 | – |
+| Charts: column, bar, line, pie (insert from selection, move, resize, title, legend) | ✅ | P1 | M5 |
+| Charts: stacked / 100% variants, area, doughnut, scatter; data labels, axis titles, colour sets, switch row/column, select data, change type | ✅ | P2 | M5 |
+| Charts: combo, secondary axis, trendlines, per-point formatting, in-place title editing | ⬜ | P2 | – |
+| Insert images (PNG, JPEG, GIF, BMP), move, resize, saved in .xlsx | ✅ | P2 | M5 |
 | Sparklines | ⬜ | P3 | – |
 | Shapes, text boxes | ⬜ | P3 | – |
 
@@ -150,7 +153,7 @@ When you finish an item, update its row in the same pull request.
 
 | Feature | Status | Priority | Milestone |
 |---|---|---|---|
-| Smooth with 100,000+ rows (open, scroll, recalculate, sort) | ⬜ | P1 | M7 |
+| Smooth with 100,000+ rows (3 × 100k rows opens in ~2.6 s, 2.8 ms paints, no autosave freezes) | ✅ | P1 | M7 |
 | Browser tests for the main flows, run in CI | ⬜ | P1 | M7 |
 | Keyboard shortcuts help (Ctrl+/) | ⬜ | P2 | – |
 | Dark mode | ⬜ | P2 | – |
@@ -176,8 +179,8 @@ Done in this order; each one is usable on its own.
 | # | Milestone | Contents |
 |---|---|---|
 | M1 ✅ | Editing & navigation | Alt+Enter, Ctrl+Enter, Paste Special, Replace, Ctrl+arrows, Ctrl+Home/End, Go To / Name Box, row/column select shortcuts, zoom |
-| M2 | Formatting | Font family/size, borders, merge, wrap, vertical alignment, row height, hide/unhide, Format Painter |
-| M3 | Formulas | Cross-sheet references, `A:A` references, F4, volatile functions, `SUBTOTAL`/`AGGREGATE`/`ROW`/`COLUMN`, financial functions |
+| M2 ✅ | Formatting | Font family/size, borders, merge, wrap, vertical alignment, row height, hide/unhide, Format Painter |
+| M3 ✅ | Formulas | Cross-sheet references, `A:A` references, F4, volatile functions, `SUBTOTAL`/`AGGREGATE`/`ROW`/`COLUMN`, financial functions |
 | M4 | Data tools | Freeze panes, filter, data validation dropdowns, remove duplicates, conditional formatting (highlight rules) |
 | M5 | Charts | Column, bar, line, pie |
 | M6 | Files & print | Save to disk (Ctrl+S), print / PDF, `.xlsx` round-trip for everything above |

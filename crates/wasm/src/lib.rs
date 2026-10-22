@@ -14,16 +14,24 @@
 
 use office_core::history::History;
 use office_core::Op;
+use sheets_engine::borders::BorderPreset;
 use sheets_engine::fill::FillDirection;
 use sheets_engine::formula::refs::{self, Axis};
 use sheets_engine::ops::{
     Batch, InsertSheet, RemoveSheet, RenameSheet, ReplaceSheet, SetCells, SetColWidths, SetStyles,
 };
+use sheets_engine::painter::StyleSnapshot;
 use sheets_engine::{Align, CellRef, FindOptions, NumberFormat, Range, Sheet, Style, StylePatch, Value, Workbook};
+use sheets_engine::{BorderLine, BorderStyle, Side, VAlign};
 use wasm_bindgen::prelude::*;
 
-mod files;
+mod charts;
 
+mod data_tools;
+mod files;
+mod layout;
+
+#[cfg(target_arch = "wasm32")]
 fn local_now_ms() -> f64 {
     let d = js_sys::Date::new_0();
     d.get_time() - d.get_timezone_offset() * 60_000.0
@@ -38,6 +46,8 @@ struct Clip {
     /// Computed values as inputs, for "paste values".
     values: Vec<String>,
     styles: Vec<Style>,
+    /// Merged areas inside the copied rectangle, relative to `origin`.
+    merges: Vec<Range>,
 }
 
 /// An open spreadsheet document plus its undo history.
@@ -46,6 +56,12 @@ pub struct SheetsDocument {
     book: Workbook,
     history: History<Workbook>,
     clip: Option<Clip>,
+    /// Formatting picked up by Format Painter.
+    painter: Option<StyleSnapshot>,
+    /// Bumped by every change, so caches know when they are stale.
+    generation: u64,
+    /// Conditional-format statistics for (sheet, generation); see `cfBlock`.
+    cf_cache: std::cell::RefCell<Option<(usize, u64, std::rc::Rc<sheets_engine::conditional_format::CfPrepared>)>>,
 }
 
 impl Default for SheetsDocument {
@@ -56,8 +72,17 @@ impl Default for SheetsDocument {
 
 impl SheetsDocument {
     fn from_book(book: Workbook) -> SheetsDocument {
+        // Native builds (tests) keep the engine's system clock.
+        #[cfg(target_arch = "wasm32")]
         sheets_engine::date::set_clock(local_now_ms);
-        SheetsDocument { book, history: History::default(), clip: None }
+        SheetsDocument {
+            book,
+            history: History::default(),
+            clip: None,
+            painter: None,
+            generation: 0,
+            cf_cache: Default::default(),
+        }
     }
 
     fn sheet(&self, sheet: usize) -> &Sheet {
@@ -66,12 +91,26 @@ impl SheetsDocument {
 
     fn apply(&mut self, op: impl Op<Workbook> + 'static) {
         self.history.apply(&mut self.book, Box::new(op));
+        self.generation += 1;
     }
 }
 
 /// Cells of a block, row-major.
 fn block(row: u32, col: u32, rows: u32, cols: u32) -> impl Iterator<Item = CellRef> {
     (row..row + rows).flat_map(move |r| (col..col + cols).map(move |c| CellRef::new(r, c)))
+}
+
+impl SheetsDocument {
+    /// New inputs for formulas on other sheets that point at rows/columns of `sheet` that moved.
+    fn lines_moved(
+        &self,
+        sheet: usize,
+        axis: Axis,
+        map: &dyn Fn(u32) -> Option<u32>,
+    ) -> Vec<(usize, Vec<(CellRef, String)>)> {
+        let name = self.book.sheets[sheet].name.clone();
+        self.book.link_edits(Some(sheet), |input| refs::remap_sheet_input(input, &name, axis, map))
+    }
 }
 
 fn rect(top: u32, left: u32, bottom: u32, right: u32) -> Range {
@@ -162,10 +201,12 @@ impl SheetsDocument {
     }
 
     pub fn undo(&mut self) -> bool {
+        self.generation += 1;
         self.history.undo(&mut self.book)
     }
 
     pub fn redo(&mut self) -> bool {
+        self.generation += 1;
         self.history.redo(&mut self.book)
     }
 
@@ -287,7 +328,9 @@ impl SheetsDocument {
     /// Apply one formatting change to a rectangle. `key`/`value` pairs:
     /// bold|italic|underline|strike: "1"/"0"; color|fill: "#RRGGBB" or "" to reset;
     /// align: "left"|"center"|"right"|""; format: "general"|"number"|"currency"|
-    /// "percent"|"date"|"time"|"datetime"|"text"; decimals: "+1"/"-1"; clear: "".
+    /// "percent"|"date"|"time"|"datetime"|"text"; decimals: "+1"/"-1"; clear: "";
+    /// font: family name or "" for the default; size: points ("10.5") or "";
+    /// fontStep: "up"|"down"; wrap: "1"/"0"; valign: "top"|"center"|"bottom".
     #[wasm_bindgen(js_name = formatRange)]
     pub fn format_range(
         &mut self,
@@ -322,14 +365,18 @@ impl SheetsDocument {
     /// `axis`: "rows" or "cols".
     #[wasm_bindgen(js_name = insertLines)]
     pub fn insert_lines(&mut self, sheet: usize, axis: &str, at: u32, count: u32) {
-        let new = self.sheet(sheet).with_inserted(parse_axis(axis), at, count);
-        self.apply(ReplaceSheet { sheet, with: Box::new(new) });
+        let axis = parse_axis(axis);
+        let new = self.sheet(sheet).with_inserted(axis, at, count);
+        let links = self.lines_moved(sheet, axis, &refs::insert_map(at, count));
+        self.apply(ReplaceSheet { sheet, with: Box::new(new), links });
     }
 
     #[wasm_bindgen(js_name = deleteLines)]
     pub fn delete_lines(&mut self, sheet: usize, axis: &str, at: u32, count: u32) {
-        let new = self.sheet(sheet).with_deleted(parse_axis(axis), at, count);
-        self.apply(ReplaceSheet { sheet, with: Box::new(new) });
+        let axis = parse_axis(axis);
+        let new = self.sheet(sheet).with_deleted(axis, at, count);
+        let links = self.lines_moved(sheet, axis, &refs::delete_map(at, count));
+        self.apply(ReplaceSheet { sheet, with: Box::new(new), links });
     }
 
     /// Sort the rows of a rectangle by the values in column `key_col`.
@@ -345,7 +392,7 @@ impl SheetsDocument {
         ascending: bool,
     ) {
         let new = self.sheet(sheet).with_sorted_rows(rect(top, left, bottom, right), key_col, ascending);
-        self.apply(ReplaceSheet { sheet, with: Box::new(new) });
+        self.apply(ReplaceSheet::new(sheet, new));
     }
 
     /// Fill-handle drag: extend the source rectangle `count` cells in
@@ -385,6 +432,7 @@ impl SheetsDocument {
             inputs: r.cells().map(|at| s.input(at).to_string()).collect(),
             values: r.cells().map(|at| s.value(at).to_input()).collect(),
             styles: r.cells().map(|at| s.style(at).clone()).collect(),
+            merges: layout::copied_merges(s.layout().merges(), r),
         };
         let display = r.cells().map(|at| s.display(at)).collect();
         self.clip = Some(clip);
@@ -421,7 +469,18 @@ impl SheetsDocument {
                 }
             }
         }
-        self.apply(Batch(vec![Box::new(SetCells { sheet, edits }), Box::new(SetStyles { sheet, styles })]));
+        let mut ops: Vec<Box<dyn Op<Workbook>>> =
+            vec![Box::new(SetCells { sheet, edits }), Box::new(SetStyles { sheet, styles })];
+        if mode == "all" || mode == "formats" {
+            // Merged cells come along with the formatting, as in Excel.
+            let existing = self.sheet(sheet).layout().merges();
+            let at = CellRef::new(row, col);
+            let merges = layout::pasted_merges(existing, &clip.merges, at, (out_rows, out_cols), transpose);
+            if merges != existing {
+                ops.push(Box::new(sheets_engine::layout::SetMerges { sheet, merges }));
+            }
+        }
+        self.apply(Batch(ops));
         vec![out_rows, out_cols]
     }
 
@@ -429,6 +488,12 @@ impl SheetsDocument {
     #[wasm_bindgen(js_name = hasCopied)]
     pub fn has_copied(&self) -> bool {
         self.clip.is_some()
+    }
+
+    /// A sheet name as written in a formula: `Sheet2`, or quoted (`'My Sheet'`) when needed.
+    #[wasm_bindgen(js_name = quoteSheetName)]
+    pub fn quote_sheet_name(name: &str) -> String {
+        refs::quote_sheet_name(name)
     }
 
     /// Shift a formula's relative references, as when it is copied.
@@ -471,6 +536,20 @@ fn parse_patch(key: &str, value: &str) -> Option<StylePatch> {
             _ => None,
         }),
         "decimals" => StylePatch::Decimals(value.parse().ok()?),
+        "font" => StylePatch::Font(color()),
+        "size" if value.is_empty() => StylePatch::FontSize(None),
+        "size" => {
+            let pt: f64 = value.trim().parse().ok().filter(|pt: &f64| pt.is_finite() && *pt > 0.0)?;
+            StylePatch::FontSize(Some((pt * 10.0).round().min(u16::MAX as f64) as u16))
+        }
+        "fontStep" => StylePatch::FontSizeStep(value == "up"),
+        "wrap" => StylePatch::Wrap(on),
+        "valign" => StylePatch::VAlign(match value {
+            "top" => VAlign::Top,
+            "center" => VAlign::Center,
+            "bottom" => VAlign::Bottom,
+            _ => return None,
+        }),
         "clear" => StylePatch::Clear,
         "format" => StylePatch::NumberFormat(match value {
             "general" => NumberFormat::General,
@@ -488,7 +567,9 @@ fn parse_patch(key: &str, value: &str) -> Option<StylePatch> {
     })
 }
 
-/// Compact JSON for the UI. Keys: b i u s (flags), color, fill, align, fmt.
+/// Compact JSON for the UI. Keys: b i u s (flags), color, fill, align, fmt,
+/// font, sz (points), wrap (flag), va ("top"|"center"; absent = bottom),
+/// border ({top|right|bottom|left: {style, color?}}).
 fn style_json(s: &Style) -> String {
     if s.is_default() {
         return String::new();
@@ -526,5 +607,176 @@ fn style_json(s: &Style) -> String {
     if let Some(f) = fmt {
         parts.push(format!("\"fmt\":\"{f}\""));
     }
+    parts.extend(formatting_json(s));
     format!("{{{}}}", parts.join(","))
+}
+
+// ---------------------------------------------------------------- fonts, borders, wrap, Format Painter
+
+#[wasm_bindgen]
+impl SheetsDocument {
+    /// Apply a Home → Borders preset to a rectangle as one undo step.
+    /// `preset`: "bottom"|"top"|"left"|"right"|"none"|"all"|"outside"|"thickOutside"|
+    /// "inside"|"insideHorizontal"|"insideVertical"|"bottomDouble"|"thickBottom"|
+    /// "topBottom"|"topThickBottom"|"topDoubleBottom". `line_style`: an `.xlsx`
+    /// border style name ("thin", "dashed", …). `color`: "#RRGGBB" or "" for automatic.
+    #[wasm_bindgen(js_name = applyBorders)]
+    pub fn apply_borders(
+        &mut self,
+        sheet: usize,
+        top: u32,
+        left: u32,
+        bottom: u32,
+        right: u32,
+        preset: &str,
+        line_style: &str,
+        color: &str,
+    ) -> Result<(), JsError> {
+        let preset =
+            BorderPreset::from_name(preset).ok_or_else(|| JsError::new(&format!("unknown preset {preset}")))?;
+        let style = BorderStyle::from_name(line_style).unwrap_or(BorderStyle::Thin);
+        let line = BorderLine::new(style, (!color.is_empty()).then(|| color.to_string()));
+        let styles = self.sheet(sheet).border_edits(rect(top, left, bottom, right), preset, &line);
+        if !styles.is_empty() {
+            self.apply(SetStyles { sheet, styles });
+        }
+        Ok(())
+    }
+
+    /// Format Painter, step 1: remember the formatting of a rectangle.
+    #[wasm_bindgen(js_name = pickFormats)]
+    pub fn pick_formats(&mut self, sheet: usize, top: u32, left: u32, bottom: u32, right: u32) {
+        self.painter = Some(StyleSnapshot::capture(self.sheet(sheet), rect(top, left, bottom, right)));
+    }
+
+    /// Format Painter, step 2: paint the picked formatting onto a rectangle as one
+    /// undo step. A single cell receives the whole picked block; a larger target is
+    /// tiled. Returns the painted [top, left, bottom, right], or empty if nothing was picked.
+    #[wasm_bindgen(js_name = paintFormats)]
+    pub fn paint_formats(&mut self, sheet: usize, top: u32, left: u32, bottom: u32, right: u32) -> Vec<u32> {
+        let Some(snapshot) = &self.painter else { return Vec::new() };
+        let area = snapshot.paint_area(rect(top, left, bottom, right));
+        let styles = snapshot.styles_for(area);
+        self.apply(SetStyles { sheet, styles });
+        vec![area.start.row, area.start.col, area.end.row, area.end.col]
+    }
+
+    /// Commit one cell's input and turn on Wrap Text in the same undo step, as
+    /// Excel does when an entry contains an Alt+Enter line break.
+    #[wasm_bindgen(js_name = setInputWrapped)]
+    pub fn set_input_wrapped(&mut self, sheet: usize, row: u32, col: u32, input: String) {
+        let at = CellRef::new(row, col);
+        let style = self.sheet(sheet).style(at).patched(&StylePatch::Wrap(true));
+        self.apply(Batch(vec![
+            Box::new(SetCells { sheet, edits: vec![(at, input)] }),
+            Box::new(SetStyles { sheet, styles: vec![(at, style)] }),
+        ]));
+    }
+}
+
+/// JSON members for font, wrap, vertical alignment and borders (see `style_json`).
+fn formatting_json(s: &Style) -> Vec<String> {
+    let mut parts = Vec::new();
+    if let Some(f) = &s.font {
+        parts.push(format!("\"font\":{}", json_string(f)));
+    }
+    if let Some(t) = s.font_size {
+        parts.push(format!("\"sz\":{}", t as f64 / 10.0));
+    }
+    if s.wrap {
+        parts.push("\"wrap\":1".into());
+    }
+    match s.valign {
+        VAlign::Top => parts.push("\"va\":\"top\"".into()),
+        VAlign::Center => parts.push("\"va\":\"center\"".into()),
+        VAlign::Bottom => {}
+    }
+    if !s.borders.is_empty() {
+        let sides: Vec<String> =
+            [("top", Side::Top), ("right", Side::Right), ("bottom", Side::Bottom), ("left", Side::Left)]
+                .into_iter()
+                .filter_map(|(key, side)| {
+                    let line = s.borders.side(side)?;
+                    let color = line.color.as_ref().map_or(String::new(), |c| format!(",\"color\":{}", json_string(c)));
+                    Some(format!("\"{key}\":{{\"style\":\"{}\"{color}}}", line.style.name()))
+                })
+                .collect();
+        parts.push(format!("\"border\":{{{}}}", sides.join(",")));
+    }
+    parts
+}
+
+fn json_string(s: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+#[cfg(test)]
+mod formatting_tests {
+    use super::*;
+
+    #[test]
+    fn style_json_includes_fonts_wrap_and_borders() {
+        let style = Style {
+            font: Some("Times \"New\" Roman".into()),
+            font_size: Some(105),
+            wrap: true,
+            valign: VAlign::Center,
+            borders: sheets_engine::Borders {
+                top: Some(BorderLine::new(BorderStyle::Thin, None)),
+                left: Some(BorderLine::new(BorderStyle::Double, Some("#FF0000".into()))),
+                ..Default::default()
+            },
+            ..Style::default()
+        };
+        assert_eq!(
+            style_json(&style),
+            r##"{"font":"Times \"New\" Roman","sz":10.5,"wrap":1,"va":"center","border":{"top":{"style":"thin"},"left":{"style":"double","color":"#FF0000"}}}"##
+        );
+    }
+
+    #[test]
+    fn parses_formatting_patches() {
+        assert_eq!(parse_patch("font", "Arial"), Some(StylePatch::Font(Some("Arial".into()))));
+        assert_eq!(parse_patch("font", ""), Some(StylePatch::Font(None)));
+        assert_eq!(parse_patch("size", "10.5"), Some(StylePatch::FontSize(Some(105))));
+        assert_eq!(parse_patch("size", ""), Some(StylePatch::FontSize(None)));
+        assert_eq!(parse_patch("size", "abc"), None);
+        assert_eq!(parse_patch("size", "-3"), None);
+        assert_eq!(parse_patch("fontStep", "up"), Some(StylePatch::FontSizeStep(true)));
+        assert_eq!(parse_patch("wrap", "1"), Some(StylePatch::Wrap(true)));
+        assert_eq!(parse_patch("valign", "top"), Some(StylePatch::VAlign(VAlign::Top)));
+        assert_eq!(parse_patch("valign", "sideways"), None);
+    }
+
+    #[test]
+    fn borders_painter_and_wrap_are_undoable() {
+        let mut doc = SheetsDocument::new();
+        doc.apply_borders(0, 0, 0, 1, 1, "all", "thin", "").unwrap();
+        assert!(doc.sheet(0).style(CellRef::new(1, 1)).borders.bottom.is_some());
+        assert!(doc.undo());
+        assert!(doc.sheet(0).style(CellRef::new(1, 1)).borders.is_empty());
+
+        doc.format_range(0, 0, 0, 0, 0, "bold", "1").unwrap();
+        doc.pick_formats(0, 0, 0, 0, 0);
+        assert_eq!(doc.paint_formats(0, 4, 4, 4, 4), vec![4, 4, 4, 4]);
+        assert!(doc.sheet(0).style(CellRef::new(4, 4)).bold);
+        assert!(doc.undo());
+        assert!(!doc.sheet(0).style(CellRef::new(4, 4)).bold);
+
+        doc.set_input_wrapped(0, 2, 2, "a\nb".into());
+        assert!(doc.sheet(0).style(CellRef::new(2, 2)).wrap);
+        assert!(doc.undo());
+        assert!(!doc.sheet(0).style(CellRef::new(2, 2)).wrap);
+        assert_eq!(doc.input(0, 2, 2), "");
+    }
 }

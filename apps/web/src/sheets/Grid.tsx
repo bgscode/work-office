@@ -3,8 +3,11 @@
 // scrollbars and receives mouse events. Drawing cost depends on the window
 // size, not on how much data there is.
 //
-// Zoom: everything is laid out in unzoomed "logical" pixels; only the canvas
-// transform, the scroll spacer, mouse coordinates and the editor are scaled.
+// Geometry (row heights, column widths, hidden lines, merged cells, frozen
+// panes) arrives as `geo` (see sheetGeometry.ts); `Panes` turns it into
+// viewport positions. Everything is laid out in unzoomed "logical" pixels;
+// only the canvas transform, the scroll spacer, mouse coordinates and the
+// editor are scaled by `zoom`.
 //
 // Keyboard focus lives in a <textarea> that sits on the active cell. It is
 // invisible until an edit starts, so typing (including IME input for Hindi,
@@ -20,24 +23,16 @@ import {
   type MouseEvent,
   type RefObject,
 } from "react";
-import type { SheetsDocument } from "@office/engine";
-import {
-  HEADER_HEIGHT,
-  HEADER_WIDTH,
-  MAX_COLS,
-  MAX_ROWS,
-  ROW_HEIGHT,
-  clampCell,
-  colName,
-  moveSelection,
-  selectionRect,
-  single,
-  type Cell,
-  type Rect,
-  type Selection,
-} from "./geometry";
-import { ColumnLayout } from "./layout";
-import { FILL_HANDLE_SIZE, colX, paint, rowY } from "./paint";
+import { parseStyle, type SheetsDocument } from "@office/engine";
+import { editorFont } from "./cellRenderer";
+import { HEADER_HEIGHT, HEADER_WIDTH, MAX_COLS, MAX_ROWS, colName, selectionRect, single, type Cell, type Rect, type Selection } from "./geometry";
+import { DEFAULT_ROW_HEIGHT } from "./layout";
+import { navigate } from "./merges";
+import type { FilterInfo } from "./features/dataTools";
+import { DrawingLayer } from "./charts/DrawingLayer";
+import type { AnchorArray } from "./charts/types";
+import { FILL_HANDLE_SIZE, filterButtonBox, makePanes, paint, type SheetGeometry } from "./paint";
+import { Panes } from "./panes";
 import { FORMULA_BAR_ID, type EditState } from "./types";
 
 export type FillDirection = "down" | "up" | "right" | "left";
@@ -50,13 +45,17 @@ export type GridShortcut =
   | "goto"
   | "fillDown"
   | "fillRight"
-  | "pasteValuesNext";
+  | "pasteValuesNext"
+  | "filter"
+  | "dropdown";
 
 export interface GridProps {
   doc: SheetsDocument;
   sheet: number;
   /** Bumped by the parent after every edit so the grid repaints. */
   revision: number;
+  /** Row/column sizes, hidden lines, merges and frozen panes. */
+  geo: SheetGeometry;
   selection: Selection;
   editing: EditState | null;
   inputRef: RefObject<HTMLTextAreaElement>;
@@ -90,16 +89,42 @@ export interface GridProps {
   onFillToEnd: () => void;
   onResizeColumn: (col: number, px: number) => void;
   onAutofit: (col: number) => void;
+  onResizeRow: (row: number, px: number) => void;
+  onAutofitRow: (row: number) => void;
   onContextMenu: (x: number, y: number) => void;
   onShortcut: (s: GridShortcut) => void;
   /** Ctrl+arrow: jump to the edge of the data (extend: also Shift). */
   onJump: (dRow: number, dCol: number, extend: boolean) => void;
+  /** AutoFilter, for the header dropdown buttons. */
+  filter: FilterInfo | null;
+  /** A filter button was clicked; x/y is where its menu opens (screen coordinates). */
+  onFilterButton: (col: number, x: number, y: number) => void;
+  /** Circle Invalid Data. */
+  circles: Cell[];
+  /** The active cell has an in-cell list (Data Validation): show its arrow button. */
+  listArrow: boolean;
+  /** The list arrow was clicked; x/y is where the list opens, width the cell's. */
+  onListArrow: (x: number, y: number, width: number) => void;
+  /** Data Validation input message for the active cell. */
+  inputMessage: { title: string; message: string } | null;
+  /** Tab moved right (not editing): remember where a run of Tab entries started. */
+  onTabMove: () => void;
+  /** Enter (not editing): returns true when it went back to where the Tabs started. */
+  onEnterAfterTabs: () => boolean;
+  /** Charts and pictures: the selected one, and what happens to them. */
+  selectedDrawing: number | null;
+  onSelectDrawing: (id: number | null) => void;
+  onDrawingAnchor: (id: number, anchor: AnchorArray) => void;
+  onDeleteDrawing: (id: number) => void;
+  onDrawingMenu: (id: number, x: number, y: number) => void;
 }
 
 type Hit =
   | { kind: "cell" | "col" | "row" | "all"; cell: Cell; onScrollbar: boolean }
   | { kind: "resize"; col: number; onScrollbar: false }
-  | { kind: "fill"; onScrollbar: false };
+  | { kind: "rowResize"; row: number; onScrollbar: false }
+  | { kind: "fill"; onScrollbar: false }
+  | { kind: "filter"; col: number; x: number; y: number; onScrollbar: false };
 
 const ARROWS: Record<string, [number, number]> = {
   ArrowUp: [-1, 0],
@@ -116,17 +141,20 @@ export function Grid(props: GridProps) {
   const [scroll, setScroll] = useState({ top: 0, left: 0 });
   // The scrollable area grows as the user scrolls or navigates, up to Excel's limits.
   const [grow, setGrow] = useState({ rows: 0, cols: 0 });
-  const [resizing, setResizing] = useState<{ col: number; width: number } | null>(null);
+  const [resizing, setResizing] = useState<{ axis: "col" | "row"; index: number; size: number } | null>(null);
   const [fillPreview, setFillPreview] = useState<Rect | null>(null);
   const [cursor, setCursor] = useState("cell");
   const pendingReveal = useRef<Cell | null>(null);
   const editingInCell = editing?.source === "cell";
 
-  const savedWidths = useMemo(() => doc.columnWidths(sheet), [doc, sheet, revision]);
-  const layout = useMemo(() => {
-    if (!resizing) return new ColumnLayout(savedWidths);
-    return new ColumnLayout([...savedWidths, resizing.col, resizing.width]);
-  }, [savedWidths, resizing]);
+  // While dragging a header border, preview the new size.
+  const geo: SheetGeometry = useMemo(() => {
+    if (!resizing) return props.geo;
+    return resizing.axis === "col"
+      ? { ...props.geo, cols: props.geo.cols.withSize(resizing.index, resizing.size) }
+      : { ...props.geo, rows: props.geo.rows.withSize(resizing.index, resizing.size) };
+  }, [props.geo, resizing]);
+  const { rows, cols, merges } = geo;
 
   const [dataRows, dataCols] = doc.extent(sheet);
   const rowCount = Math.min(MAX_ROWS, Math.max(1000, dataRows + 100, selection.anchor.row + 100, grow.rows));
@@ -135,6 +163,7 @@ export function Grid(props: GridProps) {
   // Viewport size and scroll position in logical (unzoomed) pixels.
   const view = { width: size.width / zoom, height: size.height / zoom };
   const logicalScroll = { top: scroll.top / zoom, left: scroll.left / zoom };
+  const panes = makePanes(geo, logicalScroll, view);
   const showFillHandle = sel.bottom - sel.top < MAX_ROWS - 1 && sel.right - sel.left < MAX_COLS - 1 && !editing;
 
   useLayoutEffect(() => {
@@ -161,30 +190,29 @@ export function Grid(props: GridProps) {
       doc,
       sheet,
       selection,
-      layout,
+      geo,
       highlights: props.highlights,
       fillPreview,
       showFillHandle,
+      filter: props.filter,
+      circles: props.circles,
     });
-  }, [doc, sheet, revision, selection, scroll, size, zoom, layout, props.highlights, fillPreview, showFillHandle]);
+  }, [doc, sheet, revision, selection, scroll, size, zoom, geo, props.highlights, fillPreview, showFillHandle, props.filter, props.circles]);
 
-  // Scroll a cell into view after the spacer has grown to include it.
+  // Scroll a cell (or its merged area) into view after the spacer has grown to include it.
   useLayoutEffect(() => {
     const cell = pendingReveal.current;
     const el = scrollerRef.current;
     if (!cell || !el) return;
     pendingReveal.current = null;
-    const top = cell.row * ROW_HEIGHT;
-    const left = layout.x(cell.col);
-    const right = left + layout.width(cell.col);
+    const area = merges.cellRect(cell);
+    const p = makePanes(geo, { top: el.scrollTop / zoom, left: el.scrollLeft / zoom }, view);
     const viewH = el.clientHeight / zoom - HEADER_HEIGHT;
     const viewW = el.clientWidth / zoom - HEADER_WIDTH;
-    const scrollTop = el.scrollTop / zoom;
-    const scrollLeft = el.scrollLeft / zoom;
-    if (top < scrollTop) el.scrollTop = top * zoom;
-    else if (top + ROW_HEIGHT > scrollTop + viewH) el.scrollTop = (top + ROW_HEIGHT - viewH) * zoom;
-    if (left < scrollLeft) el.scrollLeft = left * zoom;
-    else if (right > scrollLeft + viewW) el.scrollLeft = (right - viewW) * zoom;
+    const top = Panes.revealOffset(rows, area.top, geo.freeze.rows, p.frozenHeight, el.scrollTop / zoom, viewH);
+    const left = Panes.revealOffset(cols, area.left, geo.freeze.cols, p.frozenWidth, el.scrollLeft / zoom, viewW);
+    if (top !== null) el.scrollTop = top * zoom;
+    if (left !== null) el.scrollLeft = left * zoom;
   });
 
   useLayoutEffect(() => {
@@ -251,16 +279,17 @@ export function Grid(props: GridProps) {
     setGrow((g) => ({ rows: Math.max(g.rows, cell.row + 100), cols: Math.max(g.cols, cell.col + 10) }));
   }
 
+  /** Select, snapping to merged cells like Excel. */
   function select(s: Selection, revealFocus = true) {
-    props.onSelect(s);
+    props.onSelect(merges.normalize(s));
     if (revealFocus) reveal(s.focus);
   }
 
   function onScroll() {
     const el = scrollerRef.current!;
     setScroll({ top: el.scrollTop, left: el.scrollLeft });
-    const contentH = (HEADER_HEIGHT + rowCount * ROW_HEIGHT) * zoom;
-    const contentW = (HEADER_WIDTH + layout.x(colCount)) * zoom;
+    const contentH = (HEADER_HEIGHT + rows.y(rowCount)) * zoom;
+    const contentW = (HEADER_WIDTH + cols.x(colCount)) * zoom;
     if (el.scrollTop + 2 * el.clientHeight > contentH) setGrow((g) => ({ ...g, rows: rowCount + 1000 }));
     if (el.scrollLeft + 2 * el.clientWidth > contentW) setGrow((g) => ({ ...g, cols: colCount + 20 }));
   }
@@ -271,48 +300,75 @@ export function Grid(props: GridProps) {
     return { x: (e.clientX - rect.left) / zoom, y: (e.clientY - rect.top) / zoom };
   }
 
-  /** Current scroll position in logical pixels. */
-  function scrolled() {
+  /** Panes for the scroll position right now (the state may lag during a drag). */
+  function livePanes(): Panes {
     const el = scrollerRef.current!;
-    return { top: el.scrollTop / zoom, left: el.scrollLeft / zoom };
+    return makePanes(geo, { top: el.scrollTop / zoom, left: el.scrollLeft / zoom }, view);
   }
 
   function cellAt(x: number, y: number): Cell {
-    const sc = scrolled();
-    return clampCell({
-      row: Math.floor((y - HEADER_HEIGHT + sc.top) / ROW_HEIGHT),
-      col: layout.colAt(x - HEADER_WIDTH + sc.left),
-    });
+    const p = livePanes();
+    return { row: Math.min(Math.max(p.rowAt(y), 0), MAX_ROWS - 1), col: Math.min(Math.max(p.colAt(x), 0), MAX_COLS - 1) };
   }
 
   function hitTest(e: { clientX: number; clientY: number }): Hit {
     const el = scrollerRef.current!;
     const { x, y } = local(e);
-    const sc = scrolled();
+    const p = livePanes();
     const onScrollbar = x > el.clientWidth / zoom || y > el.clientHeight / zoom;
     if (!onScrollbar && y < HEADER_HEIGHT && x >= HEADER_WIDTH) {
-      // Near a column border in the header: resize.
-      const contentX = x - HEADER_WIDTH + sc.left;
-      const col = layout.colAt(contentX);
-      if (Math.abs(contentX - layout.x(col + 1)) <= 4) return { kind: "resize", col, onScrollbar: false };
-      if (col > 0 && Math.abs(contentX - layout.x(col)) <= 4) return { kind: "resize", col: col - 1, onScrollbar: false };
+      // Near a column border in the header: resize the column to its left.
+      const col = p.colAt(x);
+      const right = p.colX(col) + cols.width(col);
+      if (Math.abs(x - right) <= 4) return { kind: "resize", col, onScrollbar: false };
+      const prev = col > 0 ? cols.nextVisible(col - 1, -1) : null;
+      if (prev !== null && Math.abs(x - p.colX(col)) <= 4) return { kind: "resize", col: prev, onScrollbar: false };
+    }
+    if (!onScrollbar && x < HEADER_WIDTH && y >= HEADER_HEIGHT) {
+      // Near a row border in the header: resize the row above it.
+      const row = p.rowAt(y);
+      const bottom = p.rowY(row) + rows.height(row);
+      if (Math.abs(y - bottom) <= 3) return { kind: "rowResize", row, onScrollbar: false };
+      const prev = row > 0 ? rows.nextVisible(row - 1, -1) : null;
+      if (prev !== null && Math.abs(y - p.rowY(row)) <= 3) return { kind: "rowResize", row: prev, onScrollbar: false };
     }
     if (!onScrollbar && showFillHandle) {
-      const hx = colX(layout, sel.right + 1, sc.left);
-      const hy = rowY(sel.bottom + 1, sc.top);
+      const hx = p.colX(sel.right) + cols.width(sel.right);
+      const hy = p.rowY(sel.bottom) + rows.height(sel.bottom);
       if (Math.abs(x - hx) <= FILL_HANDLE_SIZE && Math.abs(y - hy) <= FILL_HANDLE_SIZE) return { kind: "fill", onScrollbar: false };
     }
     const cell = cellAt(x, y);
+    const button = onScrollbar ? null : filterButtonAt(cell, x, y, p);
+    if (button) return button;
     const kind = x < HEADER_WIDTH && y < HEADER_HEIGHT ? "all" : y < HEADER_HEIGHT ? "col" : x < HEADER_WIDTH ? "row" : "cell";
     return { kind, cell, onScrollbar };
+  }
+
+  /** The AutoFilter button under (x, y) in `cell`, if any; mirrors paint.ts. */
+  function filterButtonAt(cell: Cell, x: number, y: number, p: Panes): Hit | null {
+    const f = props.filter;
+    if (!f || x < HEADER_WIDTH || y < HEADER_HEIGHT) return null;
+    const area = merges.cellRect(cell);
+    if (area.top > f.range.top || area.bottom < f.range.top || cell.col < f.range.left || cell.col > f.range.right) return null;
+    const col = area.left === area.right && area.top === area.bottom ? cell.col : Math.min(area.right, f.range.right);
+    const left = area.left === area.right ? cell.col : area.left;
+    const box = filterButtonBox({
+      x: p.colX(left),
+      y: p.rowY(area.top),
+      w: cols.x(Math.min(area.right, f.range.right) + 1) - cols.x(left),
+      h: rows.y(area.bottom + 1) - rows.y(area.top),
+    });
+    if (x < box.x || x > box.x + box.size || y < box.y || y > box.y + box.size) return null;
+    const r = scrollerRef.current!.getBoundingClientRect();
+    return { kind: "filter", col, x: r.left + box.x * zoom, y: r.top + (box.y + box.size) * zoom + 1, onScrollbar: false };
   }
 
   /** Nudge the scroll position when dragging past the edge of the grid. */
   function autoScroll(e: globalThis.MouseEvent) {
     const el = scrollerRef.current!;
     const { x, y } = local(e);
-    if (y > el.clientHeight / zoom - 8) el.scrollTop += ROW_HEIGHT;
-    else if (y < HEADER_HEIGHT) el.scrollTop -= ROW_HEIGHT;
+    if (y > el.clientHeight / zoom - 8) el.scrollTop += DEFAULT_ROW_HEIGHT;
+    else if (y < HEADER_HEIGHT) el.scrollTop -= DEFAULT_ROW_HEIGHT;
     if (x > el.clientWidth / zoom - 8) el.scrollLeft += 40;
     else if (x < HEADER_WIDTH) el.scrollLeft -= 40;
   }
@@ -332,26 +388,37 @@ export function Grid(props: GridProps) {
   }
 
   function onMouseDown(e: MouseEvent) {
+    if (props.selectedDrawing !== null) props.onSelectDrawing(null);
     if (e.button !== 0) return;
     const hit = hitTest(e);
     if (hit.onScrollbar) return;
     e.preventDefault();
 
-    if (hit.kind === "resize") {
-      const startX = e.clientX;
-      const startWidth = layout.width(hit.col);
-      let width = startWidth;
-      setResizing({ col: hit.col, width });
+    if (hit.kind === "resize" || hit.kind === "rowResize") {
+      const isCol = hit.kind === "resize";
+      const index = isCol ? hit.col : hit.row;
+      const start = isCol ? e.clientX : e.clientY;
+      const startSize = isCol ? cols.width(index) : rows.height(index);
+      let next = startSize;
+      setResizing({ axis: isCol ? "col" : "row", index, size: next });
       drag(
         (ev) => {
-          width = Math.max(8, Math.round(startWidth + (ev.clientX - startX) / zoom));
-          setResizing({ col: hit.col, width });
+          next = Math.max(isCol ? 8 : 4, Math.round(startSize + ((isCol ? ev.clientX : ev.clientY) - start) / zoom));
+          setResizing({ axis: isCol ? "col" : "row", index, size: next });
         },
         () => {
           setResizing(null);
-          if (width !== startWidth) props.onResizeColumn(hit.col, width);
+          if (next === startSize) return;
+          if (isCol) props.onResizeColumn(index, next);
+          else props.onResizeRow(index, next);
         },
       );
+      return;
+    }
+
+    if (hit.kind === "filter") {
+      if (editing) props.onCommit(0, 0);
+      props.onFilterButton(hit.col, hit.x, hit.y);
       return;
     }
 
@@ -384,10 +451,10 @@ export function Grid(props: GridProps) {
     // While typing a formula, clicking cells inserts references instead of moving.
     if (props.pointMode && hit.kind === "cell") {
       const anchor = hit.cell;
-      props.onPoint(single(anchor), "start");
+      props.onPoint(merges.normalize(single(anchor)), "start");
       drag((ev) => {
         const { x, y } = local(ev);
-        props.onPoint({ anchor, focus: cellAt(x, y) }, "drag");
+        props.onPoint(merges.normalize({ anchor, focus: cellAt(x, y) }), "drag");
       });
       return;
     }
@@ -407,7 +474,7 @@ export function Grid(props: GridProps) {
       }
     };
     const initial = e.shiftKey && hit.kind === "cell" ? { anchor: selection.anchor, focus: hit.cell } : span(hit.cell);
-    props.onSelect(initial);
+    select(initial, false);
 
     // Dragging moves the focus corner; row/column drags keep their full span.
     drag((ev) => {
@@ -421,37 +488,39 @@ export function Grid(props: GridProps) {
             : hit.kind === "all"
               ? initial.focus
               : c;
-      props.onSelect({ anchor: initial.anchor, focus });
+      select({ anchor: initial.anchor, focus }, false);
     });
   }
 
   function onHover(e: MouseEvent) {
     if (e.buttons) return;
     const hit = hitTest(e);
-    const next = hit.kind === "resize" ? "col-resize" : hit.kind === "fill" ? "crosshair" : "cell";
+    const next =
+      hit.kind === "resize" ? "col-resize" : hit.kind === "rowResize" ? "row-resize" : hit.kind === "fill" ? "crosshair" : hit.kind === "filter" ? "default" : "cell";
     if (next !== cursor) setCursor(next);
   }
 
   function onDoubleClick(e: MouseEvent) {
     const hit = hitTest(e);
-    if (hit.onScrollbar) return;
+    if (hit.onScrollbar || hit.kind === "filter") return;
     if (hit.kind === "resize") props.onAutofit(hit.col);
+    else if (hit.kind === "rowResize") props.onAutofitRow(hit.row);
     else if (hit.kind === "fill") props.onFillToEnd();
     else if (hit.kind === "cell") props.onStartEdit();
   }
 
   function onContextMenu(e: MouseEvent) {
     const hit = hitTest(e);
-    if (hit.onScrollbar || hit.kind === "resize" || hit.kind === "fill") return;
+    if (hit.onScrollbar || hit.kind === "resize" || hit.kind === "rowResize" || hit.kind === "fill" || hit.kind === "filter") return;
     e.preventDefault();
     if (editing) props.onCommit(0, 0);
     // Right-clicking outside the selection selects what was clicked, like Excel.
     const c = hit.cell;
     const inside = c.row >= sel.top && c.row <= sel.bottom && c.col >= sel.left && c.col <= sel.right;
     if (!inside) {
-      if (hit.kind === "col") props.onSelect({ anchor: { row: 0, col: c.col }, focus: { row: MAX_ROWS - 1, col: c.col } });
-      else if (hit.kind === "row") props.onSelect({ anchor: { row: c.row, col: 0 }, focus: { row: c.row, col: MAX_COLS - 1 } });
-      else props.onSelect(single(c));
+      if (hit.kind === "col") select({ anchor: { row: 0, col: c.col }, focus: { row: MAX_ROWS - 1, col: c.col } }, false);
+      else if (hit.kind === "row") select({ anchor: { row: c.row, col: 0 }, focus: { row: c.row, col: MAX_COLS - 1 } }, false);
+      else select(single(c), false);
     }
     props.onContextMenu(e.clientX, e.clientY);
   }
@@ -461,6 +530,11 @@ export function Grid(props: GridProps) {
     if (e.nativeEvent.isComposing) return;
     if (editingInCell) onEditKey(e);
     else onNavigateKey(e);
+  }
+
+  /** Arrow-key style move that skips hidden lines and treats merged cells as one cell. */
+  function move(dRow: number, dCol: number, extend: boolean): Selection {
+    return navigate(selection, dRow, dCol, extend, { rows, cols, merges });
   }
 
   function onEditKey(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -481,7 +555,7 @@ export function Grid(props: GridProps) {
         props.onPointMove(dr, dc, e.shiftKey);
       } else {
         props.onCommit(dr, dc);
-        reveal(moveSelection(selection, dr, dc, false).anchor);
+        reveal(move(dr, dc, false).anchor);
       }
     }
   }
@@ -492,6 +566,18 @@ export function Grid(props: GridProps) {
     if (mod && e.shiftKey && key === "v") {
       // Ctrl+Shift+V: let the browser fire "paste", but paste values only.
       props.onShortcut("pasteValuesNext");
+      return;
+    }
+    if (mod && e.shiftKey && key === "l") {
+      // Ctrl+Shift+L: Data → Filter.
+      e.preventDefault();
+      props.onShortcut("filter");
+      return;
+    }
+    if (e.altKey && e.key === "ArrowDown") {
+      // Alt+Down: open the cell's list or the column's filter dropdown.
+      e.preventDefault();
+      props.onShortcut("dropdown");
       return;
     }
     if (mod && e.key in ARROWS) {
@@ -512,10 +598,10 @@ export function Grid(props: GridProps) {
     }
     if (mod) {
       const shortcuts: Record<string, () => void> = {
-        home: () => select(single({ row: 0, col: 0 })),
+        home: () => select(single({ row: geo.freeze.rows, col: geo.freeze.cols })),
         end: () => {
-          const [rows, cols] = doc.extent(sheet);
-          select(single({ row: Math.max(0, rows - 1), col: Math.max(0, cols - 1) }));
+          const [extentRows, extentCols] = doc.extent(sheet);
+          select(single({ row: Math.max(0, extentRows - 1), col: Math.max(0, extentCols - 1) }));
         },
         " ": () =>
           select({ anchor: { row: 0, col: selection.anchor.col }, focus: { row: MAX_ROWS - 1, col: selection.focus.col } }, false),
@@ -547,21 +633,31 @@ export function Grid(props: GridProps) {
     if (e.key in moves) {
       e.preventDefault();
       const [dr, dc] = moves[e.key];
-      select(moveSelection(selection, dr, dc, e.shiftKey));
+      const next = move(dr, dc, e.shiftKey);
+      props.onSelect(next);
+      reveal(next.focus);
       return;
     }
     switch (e.key) {
-      case "Enter":
+      case "Enter": {
         e.preventDefault();
-        select(moveSelection(selection, e.shiftKey ? -1 : 1, 0, false));
+        if (!e.shiftKey && props.onEnterAfterTabs()) return;
+        const next = move(e.shiftKey ? -1 : 1, 0, false);
+        props.onSelect(next);
+        reveal(next.focus);
         return;
-      case "Tab":
+      }
+      case "Tab": {
         e.preventDefault();
-        select(moveSelection(selection, 0, e.shiftKey ? -1 : 1, false));
+        if (!e.shiftKey) props.onTabMove();
+        const next = move(0, e.shiftKey ? -1 : 1, false);
+        props.onSelect(next);
+        reveal(next.focus);
         return;
+      }
       case "Home":
         e.preventDefault();
-        select(single({ row: selection.anchor.row, col: 0 }));
+        select(single({ row: selection.anchor.row, col: cols.nextVisible(0, 1) ?? 0 }));
         return;
       case "F2":
         e.preventDefault();
@@ -580,11 +676,20 @@ export function Grid(props: GridProps) {
   }
 
   function pageRows() {
-    return Math.max(1, Math.floor((view.height - HEADER_HEIGHT) / ROW_HEIGHT) - 1);
+    return Math.max(1, Math.floor((view.height - HEADER_HEIGHT - panes.frozenHeight) / DEFAULT_ROW_HEIGHT) - 1);
   }
 
+  // The editor covers the active cell, or its whole merged area.
   const { row, col } = selection.anchor;
+  const area = merges.cellRect(selection.anchor);
   const draft = editingInCell ? editing!.draft : "";
+  const cellStyle = parseStyle(doc.styleBlock(sheet, row, col, 1, 1)[0]);
+  const font = editorFont(cellStyle);
+  const areaW = cols.x(area.right + 1) - cols.x(area.left);
+  const areaH = rows.y(area.bottom + 1) - rows.y(area.top);
+  const lines = Math.max(1, draft.split("\n").length);
+  const cellLeft = panes.colX(area.left) * zoom;
+  const cellTop = panes.rowY(area.top) * zoom;
   return (
     <div className="grid">
       <canvas ref={canvasRef} className="grid-canvas" />
@@ -600,7 +705,38 @@ export function Grid(props: GridProps) {
         onDoubleClick={onDoubleClick}
         onContextMenu={onContextMenu}
       >
-        <div style={{ width: (HEADER_WIDTH + layout.x(colCount)) * zoom, height: (HEADER_HEIGHT + rowCount * ROW_HEIGHT) * zoom }} />
+        <div style={{ width: (HEADER_WIDTH + cols.x(colCount)) * zoom, height: (HEADER_HEIGHT + rows.y(rowCount)) * zoom }} />
+      </div>
+      <div className="drawing-clip" style={{ width: Math.max(0, size.width), height: Math.max(0, size.height) }}>
+        <DrawingLayer
+          doc={doc}
+          sheet={sheet}
+          revision={revision}
+          geo={geo}
+          scroll={logicalScroll}
+          zoom={zoom}
+          selected={props.selectedDrawing}
+          onSelect={(id) => {
+            props.onSelectDrawing(id);
+            if (id === null) inputRef.current?.focus({ preventScroll: true });
+          }}
+          onAnchor={props.onDrawingAnchor}
+          onDelete={(id) => {
+            props.onDeleteDrawing(id);
+            inputRef.current?.focus({ preventScroll: true });
+          }}
+          onContextMenu={props.onDrawingMenu}
+          onWheel={(dx, dy) => scrollerRef.current?.scrollBy(dx, dy)}
+          onKey={(e) => {
+            const mod = e.metaKey || e.ctrlKey;
+            const key = e.key.toLowerCase();
+            if (mod && (key === "z" || key === "y")) {
+              e.preventDefault();
+              if (key === "y" || e.shiftKey) props.onRedo();
+              else props.onUndo();
+            }
+          }}
+        />
       </div>
       <textarea
         ref={inputRef}
@@ -611,12 +747,15 @@ export function Grid(props: GridProps) {
         rows={1}
         value={draft}
         style={{
-          left: colX(layout, col, logicalScroll.left) * zoom,
-          top: rowY(row, logicalScroll.top) * zoom,
-          width: Math.max(layout.width(col) + 1, longestLine(draft) * 8 + 16) * zoom,
-          height: (Math.max(1, draft.split("\n").length) * (ROW_HEIGHT - 4) + 5) * zoom,
-          fontSize: 13 * zoom,
-          lineHeight: `${(ROW_HEIGHT - 4) * zoom}px`,
+          left: panes.colX(area.left) * zoom,
+          top: panes.rowY(area.top) * zoom,
+          width: Math.max(areaW + 1, longestLine(draft) * font.fontSize * 0.55 + 16) * zoom,
+          height: Math.max(areaH + 1, lines * font.lineHeight + 4) * zoom,
+          fontFamily: font.fontFamily,
+          fontSize: font.fontSize * zoom,
+          fontWeight: font.fontWeight,
+          fontStyle: font.fontStyle,
+          lineHeight: `${font.lineHeight * zoom}px`,
         }}
         onChange={(e) =>
           editing ? props.onDraftChange(e.target.value, e.target.selectionStart ?? e.target.value.length) : props.onStartEdit(e.target.value)
@@ -627,6 +766,29 @@ export function Grid(props: GridProps) {
           if (editingInCell && e.relatedTarget?.id !== FORMULA_BAR_ID) props.onCommit(0, 0);
         }}
       />
+      {props.listArrow && !editingInCell && (
+        <button
+          className="list-arrow"
+          aria-label="Show list"
+          tabIndex={-1}
+          style={{ left: cellLeft + areaW * zoom + 1, top: cellTop, height: Math.min(areaH, 20) * zoom }}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const r = scrollerRef.current!.getBoundingClientRect();
+            props.onListArrow(r.left + cellLeft, r.top + cellTop + areaH * zoom + 1, areaW * zoom);
+          }}
+        >
+          <svg width="8" height="5" viewBox="0 0 8 5" aria-hidden>
+            <path d="M0 0h8L4 5z" fill="currentColor" />
+          </svg>
+        </button>
+      )}
+      {props.inputMessage && !editing && (
+        <div className="input-message" role="tooltip" style={{ left: cellLeft + (areaW * zoom) / 2, top: cellTop + areaH * zoom + 6 }}>
+          {props.inputMessage.title && <strong>{props.inputMessage.title}</strong>}
+          {props.inputMessage.message}
+        </div>
+      )}
     </div>
   );
 }

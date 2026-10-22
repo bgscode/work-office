@@ -19,7 +19,7 @@ Pure Rust with no I/O — it runs natively in tests and as WebAssembly in the br
 | `date.rs` | Excel date serial numbers, including the 1900 leap-year quirk; pluggable clock for `TODAY()` |
 | `fill.rs` | Fill-handle series detection |
 | `sheet.rs` | One grid of cells + styles + column widths + dependency graph + recalculation; structural edits and sort |
-| `workbook.rs` | Named sheets |
+| `workbook.rs` | Named sheets and workbook-wide recalculation for formulas that read other sheets |
 | `ops.rs` | Undoable edits (`SetCells`, `SetStyles`, `SetColWidths`, `ReplaceSheet`, sheet ops, `Batch`) |
 
 ## How an edit is processed
@@ -49,9 +49,13 @@ Inserting/deleting rows or columns and sorting build a *new* `Sheet`
 rewritten by `formula/refs.rs`. The UI applies it with `ops::ReplaceSheet`, whose
 inverse is simply the old sheet, so undo is exact.
 
+## Cross-sheet formulas
+
+A formula that reads another sheet (`Sheet2!A1`) is a *link*. `Workbook::set_inputs` recalculates the cells that depend on an edit — on the same sheet or through links — in dependency order with every sheet visible (`BookSource`). Ranges larger than 4,096 cells (like `A:A`) are tracked as ranges rather than per cell. Renaming or removing a sheet, and inserting/deleting its rows or columns, rewrites links that point at it (`formula/refs.rs`).
+
 ## Known limitations
 
-- No cross-sheet references (`Sheet2!A1`), whole-column references (`A:A`) or named ranges yet.
+- No named ranges yet.
 - Large ranges in formulas (e.g. `SUM(A1:A100000)`) are expanded cell by cell in the dependency graph.
 - Volatile functions (`TODAY`, `NOW`, `RAND`) only recalculate when something they depend on changes.
 - `ReplaceSheet` keeps a full copy of the sheet per structural edit in the undo history.

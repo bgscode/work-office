@@ -1,0 +1,1810 @@
+/*
+ * Excel (Microsoft 365) look for the app chrome: title bar, ribbon, formula
+ * bar, sheet tabs, status bar, menus and dialogs. Loaded after styles.css, so
+ * rules here win. Grid colours live in apps/web/src/sheets/paint.ts.
+ */
+
+:root {
+  --xl-green: #217346;
+  --xl-green-dark: #185c37;
+  --xl-green-light: #e9f3ec;
+  --xl-chrome: #f3f2f1;
+  --xl-ribbon: #f8f8f8;
+  --xl-border: #e1dfdd;
+  --xl-border-strong: #c8c6c4;
+  --xl-hover: #e1dfdd;
+  --xl-pressed: #c8c6c4;
+  --xl-text: #252423;
+  --xl-muted: #605e5c;
+  --brand: var(--xl-green);
+  --border: var(--xl-border);
+  --muted: var(--xl-muted);
+  --surface-alt: var(--xl-chrome);
+}
+
+body {
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--xl-text);
+}
+
+/* ---------------------------------------------------------------- title bar */
+
+.title-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 8px 0 0;
+  background: var(--app-color, var(--xl-green));
+  color: #fff;
+}
+
+.home-button {
+  display: inline-grid;
+  place-items: center;
+  width: 48px;
+  height: 40px;
+  border: 0;
+  background: none;
+  color: #fff;
+}
+
+.home-button:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.title-app {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.title-app svg rect:first-child {
+  stroke: rgba(255, 255, 255, 0.7);
+  stroke-width: 1.5;
+}
+
+.title-bar .app-mark-tile {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  font-weight: 700;
+  font-size: 13px;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+.title-bar .app-switcher {
+  display: flex;
+  gap: 2px;
+}
+
+.title-bar .app-switcher button {
+  color: #fff;
+  background: none;
+  border: 0;
+  padding: 4px 10px;
+  border-radius: 3px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.title-bar .app-switcher button:hover {
+  background: rgba(255, 255, 255, 0.15);
+  opacity: 1;
+}
+
+.title-bar .app-switcher button.active {
+  background: rgba(255, 255, 255, 0.22);
+  opacity: 1;
+}
+
+.title-bar .title-slot {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+.title-bar .brand {
+  font-weight: 600;
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.workbook-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+}
+
+.quick-access {
+  display: flex;
+  gap: 2px;
+}
+
+.quick-access button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: #fff;
+  background: none;
+  border: 0;
+  border-radius: 3px;
+}
+
+.quick-access button:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Ribbon icons are drawn in colour; on the green title bar they are white. */
+.quick-access .office-icon {
+  filter: brightness(0) invert(1);
+}
+
+.file-title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.file-name {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #fff;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 3px 8px;
+  font-size: 13px;
+}
+
+.file-name:hover {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.file-name-input {
+  width: 240px;
+  padding: 3px 8px;
+  font: 13px "Segoe UI", system-ui, sans-serif;
+  border: 1px solid #fff;
+  border-radius: 3px;
+}
+
+.save-status {
+  font-size: 12px;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- ribbon */
+
+.ribbon {
+  background: var(--xl-ribbon);
+  border-bottom: 1px solid var(--xl-border);
+  user-select: none;
+}
+
+.ribbon-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 0 8px;
+  background: var(--xl-chrome);
+  height: 30px;
+}
+
+.ribbon-tabs > button {
+  position: relative;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  background: none;
+  color: var(--xl-text);
+  font-size: 13px;
+}
+
+.ribbon-tabs > button:hover {
+  background: var(--xl-hover);
+}
+
+.ribbon-tabs > button.active,
+.ribbon-tabs > button.current {
+  color: var(--xl-green);
+  font-weight: 600;
+}
+
+.ribbon-tabs > button.active::after,
+.ribbon-tabs > button.current::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  height: 3px;
+  border-radius: 2px 2px 0 0;
+  background: var(--xl-green);
+}
+
+/* File tab looks like Excel's green File button */
+.ribbon-tabs > button:first-child {
+  color: #fff;
+  background: var(--xl-green);
+  margin-right: 6px;
+  border-radius: 3px 3px 0 0;
+}
+
+.ribbon-tabs > button:first-child:hover {
+  background: var(--xl-green-dark);
+}
+
+.ribbon-tabs > button:first-child::after {
+  display: none;
+}
+
+.ribbon-tabs-spacer {
+  flex: 1;
+}
+
+.ribbon-panel {
+  position: relative;
+  background: #fff;
+  border-top: 1px solid var(--xl-border);
+}
+
+.ribbon-panel.floating {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+}
+
+.ribbon.collapsed .ribbon-panel:not(.floating) {
+  display: none;
+}
+
+.ribbon-commands {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: 0;
+  padding: 4px 28px 0 4px;
+  overflow-x: auto;
+  min-height: 92px;
+}
+
+.ribbon-group {
+  display: flex;
+  flex-direction: column;
+  padding: 0 6px;
+  border-right: 1px solid var(--xl-border);
+  flex: none;
+}
+
+.ribbon-group-body {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.ribbon-group-label {
+  padding: 2px 0 4px;
+  text-align: center;
+  color: var(--xl-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ribbon-large {
+  display: flex;
+}
+
+.ribbon-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ribbon-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+.ribbon-row {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.ribbon-separator {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--xl-border);
+}
+
+.ribbon-item {
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: 3px;
+}
+
+.ribbon-item .ribbon-button,
+.ribbon-item .ribbon-split-arrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--xl-text);
+  border-radius: 3px;
+  font-size: 12px;
+  padding: 2px 5px;
+  min-height: 24px;
+  white-space: nowrap;
+}
+
+.ribbon-item .ribbon-button:hover:not(:disabled),
+.ribbon-item .ribbon-split-arrow:hover:not(:disabled) {
+  background: var(--xl-hover);
+}
+
+.ribbon-item .ribbon-button:active:not(:disabled) {
+  background: var(--xl-pressed);
+}
+
+.ribbon-item .ribbon-button.pressed,
+.ribbon-item.is-pressed .ribbon-button {
+  background: #d2d0ce;
+  border-color: #b3b0ad;
+}
+
+.ribbon-item .ribbon-button:disabled {
+  color: #a19f9d;
+}
+
+.ribbon-item.split .ribbon-button {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.ribbon-item.split .ribbon-split-arrow {
+  padding: 2px 2px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.ribbon-item.split:hover .ribbon-button,
+.ribbon-item.split:hover .ribbon-split-arrow {
+  border-color: var(--xl-border-strong);
+}
+
+/* Large buttons: icon on top, label below */
+.ribbon-item.large {
+  flex-direction: column;
+}
+
+.ribbon-item.large .ribbon-button {
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 2px;
+  min-width: 48px;
+  padding: 4px 6px 2px;
+  height: 62px;
+}
+
+.ribbon-item.large.split .ribbon-button {
+  height: 42px;
+  border-radius: 3px 3px 0 0;
+}
+
+.ribbon-item.large.split .ribbon-split-arrow {
+  flex-direction: column;
+  height: 22px;
+  min-height: 0;
+  border-radius: 0 0 3px 3px;
+  justify-content: center;
+}
+
+.ribbon-item.large .ribbon-label {
+  font-size: 12px;
+  text-align: center;
+  line-height: 1.15;
+}
+
+.ribbon-item.small .ribbon-button {
+  justify-content: flex-start;
+}
+
+.ribbon-item.compact .ribbon-button {
+  min-width: 24px;
+  justify-content: center;
+}
+
+.ribbon-icon {
+  display: inline-grid;
+  place-items: center;
+  color: #323130;
+}
+
+.ribbon-chevron {
+  color: var(--xl-muted);
+}
+
+.ribbon-custom {
+  align-items: center;
+}
+
+.ribbon-custom select,
+.ribbon-select {
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid var(--xl-border-strong);
+  border-radius: 2px;
+  background: #fff;
+  font: 12px "Segoe UI", system-ui, sans-serif;
+  color: var(--xl-text);
+}
+
+.ribbon-custom select:hover,
+.ribbon-select:hover {
+  border-color: #8a8886;
+}
+
+.ribbon-collapse {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--xl-muted);
+}
+
+.ribbon-collapse:hover {
+  background: var(--xl-hover);
+}
+
+/* colour picker inside the ribbon */
+.color-picker {
+  height: 24px;
+  padding: 2px 5px;
+  align-items: center;
+}
+
+/* ---------------------------------------------------------------- menus, tooltips */
+
+.office-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 200px;
+  padding: 4px 0;
+  margin: 0;
+  list-style: none;
+  background: #fff;
+  border: 1px solid var(--xl-border-strong);
+  border-radius: 4px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+}
+
+.office-menu button,
+.office-menu li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 12px;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: var(--xl-text);
+  font: inherit;
+}
+
+.office-menu button:hover:not(:disabled),
+.office-menu li:hover:not(.empty) {
+  background: #f3f2f1;
+}
+
+.office-menu button:disabled {
+  color: #a19f9d;
+}
+
+.office-menu .menu-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+}
+
+.office-menu .menu-label {
+  flex: 1;
+}
+
+.office-menu kbd {
+  font: inherit;
+  color: var(--xl-muted);
+  margin-left: 24px;
+}
+
+.office-menu hr {
+  margin: 4px 0;
+  border: 0;
+  border-top: 1px solid var(--xl-border);
+}
+
+.office-menu .empty {
+  color: var(--xl-muted);
+  white-space: normal;
+}
+
+.context-menu.office-menu {
+  min-width: 230px;
+}
+
+.tooltip-anchor {
+  display: inline-flex;
+}
+
+.office-tooltip {
+  position: fixed;
+  z-index: 50;
+  max-width: 280px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid var(--xl-border-strong);
+  border-radius: 3px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-size: 12px;
+  color: var(--xl-text);
+  pointer-events: none;
+}
+
+.office-tooltip strong {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.office-tooltip span {
+  display: block;
+  color: var(--xl-muted);
+}
+
+/* ---------------------------------------------------------------- formula bar */
+
+.formula-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: #fff;
+  border-bottom: 1px solid var(--xl-border);
+}
+
+.name-box-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+input.name-box,
+.formula-bar .name-box {
+  width: 96px;
+  height: 24px;
+  padding: 0 22px 0 6px;
+  border: 1px solid var(--xl-border-strong);
+  border-radius: 0;
+  font: 13px "Segoe UI", system-ui, sans-serif;
+}
+
+.name-box-arrow {
+  position: absolute;
+  right: 1px;
+  top: 1px;
+  bottom: 1px;
+  width: 20px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  color: var(--xl-muted);
+}
+
+.name-box-arrow:hover {
+  background: var(--xl-hover);
+}
+
+.name-box-list.office-menu {
+  position: absolute;
+  top: 26px;
+  left: 0;
+}
+
+.formula-bar-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--xl-border-strong);
+}
+
+.formula-buttons {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.formula-buttons button {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  color: var(--xl-muted);
+}
+
+.formula-buttons button:hover:not(:disabled) {
+  background: var(--xl-hover);
+}
+
+.formula-buttons button:disabled {
+  color: #c8c6c4;
+}
+
+.formula-buttons .fb-cancel:not(:disabled) {
+  color: #c50f1f;
+}
+
+.formula-buttons .fb-enter:not(:disabled) {
+  color: var(--xl-green);
+}
+
+.formula-buttons .fx {
+  font-style: italic;
+  font-family: "Times New Roman", serif;
+  font-size: 15px;
+  color: var(--xl-text);
+}
+
+.formula-bar .formula-input {
+  height: 24px;
+}
+
+.formula-bar textarea {
+  border: 1px solid var(--xl-border-strong);
+  border-radius: 0;
+  font: 14px Calibri, Carlito, "Segoe UI", Arial, sans-serif;
+  line-height: 20px;
+  padding: 1px 6px;
+}
+
+/* ---------------------------------------------------------------- grid editor */
+
+textarea.cell-editor {
+  border: 2px solid var(--xl-green);
+  font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+}
+
+/* ---------------------------------------------------------------- footer: tabs + status */
+
+.sheets-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  border-top: 1px solid var(--xl-border);
+  background: var(--xl-chrome);
+  min-height: 0;
+}
+
+.sheet-tabs-bar {
+  display: flex;
+  align-items: stretch;
+  height: 28px;
+  background: var(--xl-chrome);
+  border-bottom: 1px solid var(--xl-border);
+}
+
+.sheet-tab-scroll {
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+}
+
+.sheet-tab-scroll button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  color: var(--xl-muted);
+}
+
+.sheet-tab-scroll button:hover:not(:disabled) {
+  background: var(--xl-hover);
+}
+
+.sheet-tab-scroll button:disabled {
+  color: #c8c6c4;
+}
+
+.sheet-tabs {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.sheet-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.sheet-tabs button[role="tab"] {
+  position: relative;
+  padding: 0 16px;
+  border: 0;
+  border-right: 1px solid var(--xl-border);
+  background: none;
+  color: var(--xl-text);
+  font-size: 12px;
+  white-space: nowrap;
+  box-shadow: none;
+  font-weight: 400;
+}
+
+.sheet-tabs button[role="tab"]:hover {
+  background: var(--xl-hover);
+}
+
+.sheet-tabs button[role="tab"].active {
+  background: #fff;
+  color: var(--xl-green);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.sheet-tabs button[role="tab"].active::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--xl-green);
+}
+
+.sheet-tabs .add-sheet,
+.sheet-tabs-bar .add-sheet {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  border: 0;
+  background: none;
+  color: var(--xl-muted);
+  font-size: 16px;
+  padding: 0;
+}
+
+.sheet-tabs-bar .add-sheet:hover {
+  background: var(--xl-hover);
+  color: var(--xl-green);
+}
+
+.tab-rename {
+  border-color: var(--xl-green);
+}
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 24px;
+  padding: 0 10px;
+  background: var(--xl-chrome);
+  color: var(--xl-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.status-mode {
+  min-width: 48px;
+}
+
+.status-spacer {
+  flex: 1;
+}
+
+.status-stats {
+  display: flex;
+  gap: 18px;
+}
+
+.zoom-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.zoom-step {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  color: var(--xl-muted);
+}
+
+.zoom-step:hover:not(:disabled) {
+  background: var(--xl-hover);
+}
+
+.zoom-slider {
+  width: 100px;
+  height: 4px;
+  accent-color: var(--xl-muted);
+}
+
+.status-bar .zoom,
+.sheets-footer .zoom {
+  margin: 0;
+  border: 0;
+  background: none;
+  font: 12px "Segoe UI", system-ui, sans-serif;
+  color: var(--xl-muted);
+}
+
+/* ---------------------------------------------------------------- dialogs */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.dialog-backdrop > div,
+.dialog {
+  min-width: 360px;
+  max-width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid var(--xl-border-strong);
+  border-radius: 4px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+}
+
+.dialog-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dialog-close {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--xl-muted);
+}
+
+.dialog-close:hover {
+  background: var(--xl-hover);
+}
+
+.dialog-body {
+  padding: 4px 14px 12px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+.dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.dialog-field.inline {
+  flex-direction: row;
+  align-items: center;
+}
+
+.dialog-field input,
+.dialog-field select {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--xl-border-strong);
+  border-radius: 2px;
+  font: 12px "Segoe UI", system-ui, sans-serif;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--xl-border);
+}
+
+.dialog-button {
+  min-width: 80px;
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--xl-border-strong);
+  border-radius: 2px;
+  background: #fff;
+  font: 12px "Segoe UI", system-ui, sans-serif;
+}
+
+.dialog-button:hover {
+  background: #f3f2f1;
+}
+
+.dialog-button.primary {
+  background: var(--xl-green);
+  border-color: var(--xl-green);
+  color: #fff;
+}
+
+.dialog-button.primary:hover {
+  background: var(--xl-green-dark);
+}
+
+.insert-function .function-list {
+  height: 220px;
+  margin: 6px 0;
+  padding: 0;
+  list-style: none;
+  overflow: auto;
+  border: 1px solid var(--xl-border-strong);
+}
+
+.insert-function .function-list li {
+  padding: 3px 8px;
+  cursor: default;
+  font-family: Calibri, Carlito, "Segoe UI", sans-serif;
+  font-size: 13px;
+}
+
+.insert-function .function-list li[aria-selected="true"] {
+  background: #cfe4d6;
+}
+
+.function-help {
+  min-height: 40px;
+  color: var(--xl-muted);
+}
+
+.function-help code {
+  display: block;
+  color: var(--xl-text);
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+/* ---------------------------------------------------------------- find & replace */
+
+.find-bar {
+  border-radius: 4px;
+  border-color: var(--xl-border-strong);
+}
+
+.find-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.find-title {
+  font-weight: 600;
+}
+
+.find-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.find-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  padding: 4px 8px;
+}
+
+.find-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--xl-green);
+  color: var(--xl-green);
+  font-weight: 600;
+}
+
+.find-close {
+  border: 0;
+  background: none;
+}
+
+.find-message {
+  color: var(--xl-green);
+}
+
+/* ---------------------------------------------------------------- autocomplete */
+
+.formula-suggestions li.selected {
+  background: #cfe4d6;
+}
+
+.formula-suggestions,
+.formula-hint {
+  border-radius: 2px;
+  border-color: var(--xl-border-strong);
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+/* ---------------------------------------------------------------- cell formatting controls */
+
+.font-step {
+  font: 600 14px "Segoe UI", system-ui, sans-serif;
+  line-height: 1;
+}
+
+.font-step.small {
+  font-size: 11px;
+}
+
+.font-step sup {
+  font-size: 7px;
+  vertical-align: top;
+}
+
+.color-chip {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.ribbon-button.painter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  padding: 2px 5px;
+  min-height: 24px;
+  font-size: 12px;
+  color: var(--xl-text);
+}
+
+.ribbon-button.painter:hover {
+  background: var(--xl-hover);
+}
+
+.ribbon-button.painter.pressed {
+  background: #d2d0ce;
+  border-color: #b3b0ad;
+}
+
+/* Format Painter active: paintbrush-style cursor over the grid. */
+.grid-area.painting .grid-scroller {
+  cursor: copy !important;
+}
+
+/* Font / Font Size boxes (sheets/features/ComboBox.tsx) */
+.fmt-combo {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  height: 24px;
+  border: 1px solid var(--xl-border-strong);
+  background: #fff;
+}
+
+.fmt-combo:hover,
+.fmt-combo:focus-within {
+  border-color: #8a8886;
+}
+
+.fmt-combo input {
+  min-width: 0;
+  padding: 0 4px;
+  border: 0;
+  outline: none;
+  font: 12px "Segoe UI", system-ui, sans-serif;
+  color: var(--xl-text);
+}
+
+.fmt-combo-arrow {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid transparent;
+  background: none;
+  color: var(--xl-muted);
+}
+
+.fmt-combo-arrow:hover {
+  background: var(--xl-hover);
+}
+
+/* Popup list of Select and ComboBox (rendered in a portal, position: fixed) */
+.xl-popup-list {
+  z-index: 80;
+  margin: 0;
+  padding: 2px 0;
+  overflow-y: auto;
+  list-style: none;
+  background: #fff;
+  border: 1px solid var(--xl-border-strong);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  font: 12px "Segoe UI", system-ui, sans-serif;
+  color: var(--xl-text);
+}
+
+.xl-popup-list li {
+  padding: 4px 10px;
+  white-space: nowrap;
+  font-size: 13px;
+  cursor: default;
+}
+
+.xl-popup-list li.current {
+  background: #e1dfdd;
+}
+
+.xl-popup-list li.active,
+.xl-popup-list li:not(.disabled):hover {
+  background: #cfe4d6;
+}
+
+.xl-popup-list li.disabled {
+  color: #a19f9d;
+}
+
+/* Select: the same box as the Font combo, everywhere (ribbon, dialogs, status bar) */
+.xl-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 4px 0 6px;
+  border: 1px solid var(--xl-border-strong);
+  border-radius: 0;
+  background: #fff;
+  font: 12px "Segoe UI", system-ui, sans-serif;
+  color: var(--xl-text);
+  text-align: left;
+  cursor: default;
+}
+
+.xl-select:hover:not(:disabled),
+.xl-select:focus-visible,
+.xl-select[aria-expanded="true"] {
+  border-color: #8a8886;
+  outline: none;
+}
+
+.xl-select:focus-visible {
+  border-color: var(--xl-green);
+  box-shadow: inset 0 0 0 1px var(--xl-green);
+}
+
+.xl-select:disabled {
+  color: #a19f9d;
+  background: #f3f2f1;
+}
+
+.xl-select-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.xl-select-arrow {
+  flex: none;
+  color: var(--xl-muted);
+}
+
+.dialog .xl-select {
+  height: 26px;
+}
+
+.dialog-field .xl-select,
+.dialog-table .xl-select {
+  width: 100%;
+}
+
+/* Text boxes in dialogs and panes: Excel's thin border, green when focused */
+.dialog input:not([type]),
+.dialog input[type="text"],
+.dialog textarea,
+.filter-menu-search,
+.fmt-combo:focus-within {
+  outline: none;
+}
+
+.dialog input:not([type]):focus,
+.dialog input[type="text"]:focus,
+.dialog textarea:focus,
+.filter-menu-search:focus,
+.fmt-combo:focus-within {
+  border-color: var(--xl-green);
+  box-shadow: inset 0 0 0 1px var(--xl-green);
+}
+
+.dialog-error {
+  margin: 4px 0 0;
+  color: #c50f1f;
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- opening a workbook */
+
+.sheets-loading {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--xl-muted);
+  font-size: 14px;
+}
+
+.sheets-loading button {
+  padding: 6px 14px;
+  border: 1px solid var(--xl-border-strong);
+  border-radius: 3px;
+  background: #fff;
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #d2e8d8;
+  border-top-color: var(--xl-green);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------------------------------------------------------------- data tools */
+
+.status-note {
+  margin-left: 16px;
+  color: var(--xl-text);
+}
+
+/* AutoFilter dropdown */
+.filter-menu {
+  position: fixed;
+  z-index: 55;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  background: #fff;
+  border: 1px solid var(--xl-border-strong);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  font-size: 12px;
+}
+
+.filter-menu hr {
+  margin: 4px 0;
+  border: 0;
+  border-top: 1px solid var(--xl-border);
+}
+
+.filter-menu-item {
+  display: block;
+  width: 100%;
+  padding: 5px 12px 5px 28px;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: inherit;
+  color: var(--xl-text);
+}
+
+.filter-menu-item:hover:not(:disabled) {
+  background: var(--xl-hover);
+}
+
+.filter-menu-item:disabled {
+  color: #a19f9d;
+}
+
+.filter-menu-item.active {
+  background: var(--xl-green-light);
+}
+
+.filter-menu-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding-right: 8px;
+}
+
+.filter-menu-row .filter-menu-item {
+  width: auto;
+  flex: 1 0 100%;
+}
+
+.filter-menu-chip {
+  margin-left: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--xl-border-strong);
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  font-size: 11px;
+}
+
+.filter-menu-chip + .filter-menu-chip {
+  margin-left: 0;
+}
+
+.filter-menu-chip:hover {
+  background: var(--xl-hover);
+}
+
+.filter-menu-search {
+  margin: 6px 10px 4px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--xl-border-strong);
+  font: inherit;
+}
+
+.filter-menu-list {
+  height: 190px;
+  margin: 0 10px;
+  padding: 2px 0;
+  overflow: auto;
+  border: 1px solid var(--xl-border-strong);
+}
+
+.filter-menu-check,
+.dialog-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filter-menu-check input,
+.dialog-check input {
+  margin: 0;
+  accent-color: var(--xl-green);
+}
+
+.filter-menu-note {
+  margin: 4px 6px;
+  color: var(--xl-muted);
+  white-space: normal;
+}
+
+.filter-menu-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px 10px 4px;
+}
+
+.filter-menu-footer .dialog-button {
+  min-width: 64px;
+}
+
+/* In-cell list (Data Validation) */
+.list-arrow {
+  position: absolute;
+  z-index: 3;
+  width: 17px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: #fff;
+  border: 1px solid #a6a6a6;
+  color: #444;
+}
+
+.list-arrow:hover {
+  background: var(--xl-hover);
+}
+
+.list-dropdown {
+  position: fixed;
+  z-index: 55;
+  max-height: 200px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #7a7a7a;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font: 14px Calibri, Carlito, "Segoe UI", Arial, sans-serif;
+  outline: none;
+}
+
+.list-dropdown li {
+  padding: 1px 6px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.list-dropdown li.active {
+  background: #cfe4d6;
+}
+
+.input-message {
+  position: absolute;
+  z-index: 3;
+  max-width: 240px;
+  padding: 6px 8px;
+  background: #ffffe1;
+  border: 1px solid #767676;
+  box-shadow: 1px 2px 4px rgba(0, 0, 0, 0.2);
+  font-size: 12px;
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+
+.input-message strong {
+  display: block;
+  margin-bottom: 2px;
+}
+
+/* Dialog building blocks used by Sort, Data Validation, Conditional Formatting */
+.dialog-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.dialog-row select,
+.dialog-row input:not([type]),
+.dialog-row input[type="text"],
+.dialog-table select {
+  height: 26px;
+  min-width: 0;
+  padding: 0 6px;
+  border: 1px solid var(--xl-border-strong);
+  border-radius: 2px;
+  font: 12px "Segoe UI", system-ui, sans-serif;
+}
+
+.dialog-row input:not([type]) {
+  flex: 1;
+}
+
+.dialog-row.radios {
+  gap: 16px;
+  padding-left: 24px;
+}
+
+.dialog-row.toolbar .dialog-button {
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.dialog-button.icon {
+  width: 28px;
+  padding: 0;
+}
+
+.dialog-button:disabled {
+  color: #a19f9d;
+  background: #f3f2f1;
+}
+
+.push {
+  margin-left: auto;
+}
+
+.push-left {
+  margin-right: auto;
+}
+
+.dialog-label {
+  margin: 4px 0 8px;
+  font-weight: 600;
+}
+
+.dialog-hint,
+.dialog-message {
+  margin: 8px 0 0;
+  color: var(--xl-muted);
+  line-height: 1.5;
+}
+
+.dialog-message {
+  color: var(--xl-text);
+  font-size: 13px;
+}
+
+.dialog-field textarea {
+  padding: 4px 6px;
+  border: 1px solid var(--xl-border-strong);
+  border-radius: 2px;
+  font: 12px "Segoe UI", system-ui, sans-serif;
+  resize: vertical;
+}
+
+.dialog-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--xl-border-strong);
+}
+
+.dialog-table th {
+  padding: 4px 6px;
+  background: var(--xl-chrome);
+  border-bottom: 1px solid var(--xl-border-strong);
+  font-weight: 600;
+  text-align: left;
+}
+
+.dialog-table td {
+  padding: 3px 6px;
+}
+
+.dialog-table tr.current td {
+  background: #cfe4d6;
+}
+
+.dialog-table select {
+  width: 100%;
+}
+
+.dialog-checklist {
+  max-height: 200px;
+  overflow: auto;
+  border: 1px solid var(--xl-border-strong);
+  padding: 2px 0;
+}
+
+.dialog-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--xl-border-strong);
+  margin-bottom: 10px;
+}
+
+.dialog-tab {
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  background: none;
+  font: inherit;
+  color: var(--xl-muted);
+}
+
+.dialog-tab.active {
+  margin-bottom: -1px;
+  background: #fff;
+  border-color: var(--xl-border-strong);
+  color: var(--xl-text);
+  font-weight: 600;
+}
+
+.dialog-tab-body {
+  min-height: 210px;
+}
+
+/* Conditional formatting */
+.cf-preview {
+  display: inline-block;
+  min-width: 72px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--xl-border-strong);
+  font: 14px Calibri, Carlito, "Segoe UI", Arial, sans-serif;
+  line-height: 18px;
+  text-align: center;
+}
+
+.cf-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 56px);
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.cf-swatch {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid var(--xl-border-strong);
+  border-radius: 2px;
+}
+
+.cf-swatch:hover {
+  border-color: var(--xl-green);
+  background: var(--xl-green-light);
+}
+
+.cf-bar {
+  display: block;
+  height: 10px;
+}
+
+.cf-scale {
+  display: block;
+  flex: 1;
+}
+
+/* Validation error alert */
+.alert-body {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding-top: 6px;
+}
+
+.alert-body p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.alert-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 16px;
+}
+
+.alert-body.stop .alert-icon {
+  background: #c50f1f;
+}
+
+.alert-body.warning .alert-icon {
+  background: #f7b500;
+  border-radius: 4px;
+  color: #252423;
+}
+
+.alert-body.information .alert-icon {
+  background: #0f6cbd;
+}
+
+.xl-select.number-format {
+  width: 160px;
+}
+
+.status-bar .xl-select.zoom {
+  height: 20px;
+  padding: 0 4px;
+}
+
+.status-bar .xl-select.zoom:hover {
+  background: var(--xl-hover);
+}
+
+/* ---------------------------------------------------------------- charts and pictures */
+
+.drawing-clip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.drawing-layer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+}
+
+.drawing {
+  position: absolute;
+  pointer-events: auto;
+  cursor: move;
+  outline: none;
+}
+
+.drawing.selected {
+  box-shadow: 0 0 0 1px #8a8886;
+}
+
+.drawing-canvas,
+.drawing-picture {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.drawing-picture {
+  object-fit: fill;
+  user-select: none;
+}
+
+.drawing-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  background: #fff;
+  border: 1px solid #605e5c;
+  border-radius: 50%;
+}
+
+.drawing-handle.nw { left: 0; top: 0; cursor: nwse-resize; }
+.drawing-handle.n { left: 50%; top: 0; cursor: ns-resize; }
+.drawing-handle.ne { left: 100%; top: 0; cursor: nesw-resize; }
+.drawing-handle.e { left: 100%; top: 50%; cursor: ew-resize; }
+.drawing-handle.se { left: 100%; top: 100%; cursor: nwse-resize; }
+.drawing-handle.s { left: 50%; top: 100%; cursor: ns-resize; }
+.drawing-handle.sw { left: 0; top: 100%; cursor: nesw-resize; }
+.drawing-handle.w { left: 0; top: 50%; cursor: ew-resize; }
+
+/* Contextual ribbon tabs (Chart Design) */
+.ribbon-tabs > button.contextual {
+  color: var(--xl-green-dark);
+}

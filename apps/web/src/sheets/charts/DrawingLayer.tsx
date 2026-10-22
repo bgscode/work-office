@@ -1,0 +1,231 @@
+// Charts and pictures floating over the grid. Each drawing is anchored to
+// cells (see crates/sheets-engine/src/chart.rs), so it is positioned from the
+// sheet's column/row layout and follows resizes, hidden lines and scrolling.
+//
+// Like Excel: click selects (frame with eight sizing handles), drag moves,
+// handles resize (Shift keeps the shape), Delete removes, Esc goes back to the
+// cells. A move or resize is one undoable step, sent when the mouse is released.
+
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { SheetsDocument } from "@office/engine";
+import { HEADER_HEIGHT, HEADER_WIDTH } from "../geometry";
+import type { SheetGeometry } from "../paint";
+import { axisLengths, drawChart } from "./renderChart";
+import type { AnchorArray, ChartView, DrawingInfo } from "./types";
+
+export interface Rect4 {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** A drawing's rectangle in sheet pixels (from the top-left of A1). */
+export function anchorRect(geo: SheetGeometry, a: AnchorArray): Rect4 {
+  const x = geo.cols.x(a[1]) + Math.min(a[3], geo.cols.width(a[1]));
+  const y = geo.rows.y(a[0]) + Math.min(a[2], geo.rows.height(a[0]));
+  const x2 = geo.cols.x(a[5]) + Math.min(a[7], geo.cols.width(a[5]));
+  const y2 = geo.rows.y(a[4]) + Math.min(a[6], geo.rows.height(a[4]));
+  return { x, y, w: Math.max(0, x2 - x), h: Math.max(0, y2 - y) };
+}
+
+/** The anchor for a rectangle in sheet pixels. */
+export function rectAnchor(geo: SheetGeometry, r: Rect4): AnchorArray {
+  const point = (x: number, y: number) => {
+    const col = geo.cols.colAt(Math.max(0, x));
+    const row = geo.rows.rowAt(Math.max(0, y));
+    return [row, col, Math.max(0, y - geo.rows.y(row)), Math.max(0, x - geo.cols.x(col))];
+  };
+  return [...point(r.x, r.y), ...point(r.x + r.w, r.y + r.h)] as AnchorArray;
+}
+
+const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const;
+type Handle = (typeof HANDLES)[number];
+const MIN_SIZE = 20;
+
+interface Props {
+  doc: SheetsDocument;
+  sheet: number;
+  revision: number;
+  geo: SheetGeometry;
+  /** Scroll position in logical pixels. */
+  scroll: { top: number; left: number };
+  zoom: number;
+  selected: number | null;
+  onSelect: (id: number | null) => void;
+  /** A drawing was moved or resized. */
+  onAnchor: (id: number, anchor: AnchorArray) => void;
+  onDelete: (id: number) => void;
+  onContextMenu: (id: number, x: number, y: number) => void;
+  /** Wheel over a drawing scrolls the grid. */
+  onWheel: (dx: number, dy: number) => void;
+  /** Keys a drawing doesn't handle itself (undo, redo). */
+  onKey: (e: ReactKeyboardEvent) => void;
+}
+
+export function DrawingLayer(props: Props) {
+  const { doc, sheet, revision, geo, scroll, zoom } = props;
+  const drawings = useMemo(() => JSON.parse(doc.drawingsJson(sheet) || "[]") as DrawingInfo[], [doc, sheet, revision]);
+  // Live rectangle while moving or resizing (sheet pixels).
+  const [drag, setDrag] = useState<{ id: number; rect: Rect4 } | null>(null);
+  const layerRef = useRef<HTMLDivElement>(null);
+  // A selected drawing has the keyboard (Delete, arrows, Esc), however it was selected.
+  useEffect(() => {
+    if (props.selected === null) return;
+    layerRef.current?.querySelector<HTMLElement>(`[data-drawing="${props.selected}"]`)?.focus({ preventScroll: true });
+  }, [props.selected, drawings]);
+  if (drawings.length === 0) return null;
+
+  /** Sheet pixels to layer pixels (the layer starts below/right of the headers). */
+  const toLayer = (r: Rect4): Rect4 => {
+    const frozenCols = geo.freeze.cols > 0 && r.x < geo.cols.x(geo.freeze.cols);
+    const frozenRows = geo.freeze.rows > 0 && r.y < geo.rows.y(geo.freeze.rows);
+    return {
+      x: (r.x - (frozenCols ? 0 : scroll.left)) * zoom,
+      y: (r.y - (frozenRows ? 0 : scroll.top)) * zoom,
+      w: r.w * zoom,
+      h: r.h * zoom,
+    };
+  };
+
+  function startDrag(e: React.MouseEvent, d: DrawingInfo, handle: Handle | null) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    props.onSelect(d.id);
+    (e.currentTarget as HTMLElement).closest<HTMLElement>(".drawing")?.focus({ preventScroll: true });
+    const start = anchorRect(geo, d.anchor);
+    const ratio = start.w / Math.max(1, start.h);
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    let rect = start;
+    let moved = false;
+    const move = (ev: MouseEvent) => {
+      const dx = (ev.clientX - x0) / zoom;
+      const dy = (ev.clientY - y0) / zoom;
+      if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+      moved = true;
+      if (!handle) {
+        rect = { ...start, x: Math.max(0, start.x + dx), y: Math.max(0, start.y + dy) };
+      } else {
+        let { x, y, w, h } = start;
+        if (handle.includes("e")) w = Math.max(MIN_SIZE, start.w + dx);
+        if (handle.includes("s")) h = Math.max(MIN_SIZE, start.h + dy);
+        if (handle.includes("w")) {
+          w = Math.max(MIN_SIZE, start.w - dx);
+          x = start.x + start.w - w;
+        }
+        if (handle.includes("n")) {
+          h = Math.max(MIN_SIZE, start.h - dy);
+          y = start.y + start.h - h;
+        }
+        // Shift on a corner keeps the proportions.
+        if (ev.shiftKey && handle.length === 2) {
+          if (w / h > ratio) h = w / ratio;
+          else w = h * ratio;
+          if (handle.includes("n")) y = start.y + start.h - h;
+          if (handle.includes("w")) x = start.x + start.w - w;
+        }
+        rect = { x: Math.max(0, x), y: Math.max(0, y), w, h };
+      }
+      setDrag({ id: d.id, rect });
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      setDrag(null);
+      if (moved) props.onAnchor(d.id, rectAnchor(geo, rect));
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  }
+
+  function onKeyDown(e: ReactKeyboardEvent, d: DrawingInfo) {
+    if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault();
+      props.onDelete(d.id);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      props.onSelect(null);
+    } else if (e.key.startsWith("Arrow")) {
+      // Arrow keys nudge the drawing by a pixel (Excel moves by one cell edge with Alt; we keep it simple).
+      e.preventDefault();
+      const r = anchorRect(geo, d.anchor);
+      const step = e.shiftKey ? 10 : 1;
+      const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+      const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+      props.onAnchor(d.id, rectAnchor(geo, { ...r, x: Math.max(0, r.x + dx), y: Math.max(0, r.y + dy) }));
+    } else props.onKey(e);
+  }
+
+  return (
+    <div ref={layerRef} className="drawing-layer" style={{ left: HEADER_WIDTH * zoom, top: HEADER_HEIGHT * zoom }} onWheel={(e) => props.onWheel(e.deltaX, e.deltaY)}>
+      {drawings.map((d) => {
+        const rect = drag?.id === d.id ? drag.rect : anchorRect(geo, d.anchor);
+        if (rect.w <= 0 || rect.h <= 0) return null;
+        const px = toLayer(rect);
+        const selected = props.selected === d.id;
+        return (
+          <div
+            key={d.id}
+            data-drawing={d.id}
+            className={selected ? "drawing selected" : "drawing"}
+            role="img"
+            aria-label={d.name}
+            tabIndex={-1}
+            style={{ left: px.x, top: px.y, width: px.w, height: px.h }}
+            onMouseDown={(e) => startDrag(e, d, null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              props.onSelect(d.id);
+              props.onContextMenu(d.id, e.clientX, e.clientY);
+            }}
+            onKeyDown={(e) => onKeyDown(e, d)}
+          >
+            {d.kind === "chart" ? (
+              <ChartCanvas doc={doc} sheet={sheet} id={d.id} revision={revision} width={rect.w} height={rect.h} zoom={zoom} />
+            ) : (
+              <Picture doc={doc} sheet={sheet} id={d.id} mime={d.mime} name={d.name} />
+            )}
+            {selected &&
+              HANDLES.map((h) => <span key={h} className={`drawing-handle ${h}`} onMouseDown={(e) => startDrag(e, d, h)} />)}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ChartCanvas({ doc, sheet, id, revision, width, height, zoom }: { doc: SheetsDocument; sheet: number; id: number; revision: number; width: number; height: number; zoom: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  // Axis lengths only change the number of gridlines; round them so dragging doesn't refetch data constantly.
+  const lengths = axisLengths(width, height);
+  const valuePx = Math.round(lengths.value / 20) * 20;
+  const xPx = Math.round(lengths.x / 20) * 20;
+  const view = useMemo(() => {
+    const json = doc.chartViewJson(sheet, id, valuePx, xPx);
+    return json ? (JSON.parse(json) as ChartView) : null;
+  }, [doc, sheet, id, revision, valuePx, xPx]);
+  useLayoutEffect(() => {
+    const canvas = ref.current;
+    if (!canvas || !view) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(width * zoom * dpr));
+    canvas.height = Math.max(1, Math.round(height * zoom * dpr));
+    const ctx = canvas.getContext("2d")!;
+    ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, 0, 0);
+    drawChart(ctx, view, width, height);
+  }, [view, width, height, zoom]);
+  return <canvas ref={ref} className="drawing-canvas" />;
+}
+
+function Picture({ doc, sheet, id, mime, name }: { doc: SheetsDocument; sheet: number; id: number; mime: string; name: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const bytes = doc.pictureData(sheet, id);
+    const u = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [doc, sheet, id, mime]);
+  return url ? <img className="drawing-picture" src={url} alt={name} draggable={false} /> : null;
+}

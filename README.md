@@ -8,18 +8,26 @@ See the [roadmap](docs/ROADMAP.md).
 
 ![Sheets](docs/images/sheets.png)
 
+## Home
+
+Opening the app shows a start page like Microsoft 365's: create a blank workbook, open or drop an `.xlsx`/`.csv` file, or reopen a recent file. Every workbook is saved in your browser automatically.
+
 ## Sheets today
 
 - Canvas grid with virtual scrolling up to Excel's limits (1,048,576 × 16,384), resizable columns
 - Formulas with automatic, incremental recalculation and cycle detection
-- [127 functions](crates/sheets-engine/FUNCTIONS.md): `SUM`, `IF`, `XLOOKUP`, `VLOOKUP`, `SUMIFS`, `TEXT`, dates, statistics…
+- [158 functions](crates/sheets-engine/FUNCTIONS.md): `SUM`, `IF`, `XLOOKUP`, `VLOOKUP`, `SUMIFS`, `TEXT`, `PMT`, `NPV`, `SUBTOTAL`, dates, statistics…
+- Formulas across sheets (`Sheet2!A1`, `'My Data'!B:B`), whole columns/rows, F4 for `$` references
 - Formula autocomplete with syntax hints; click or drag cells (or use arrow keys) to insert references, shown in colour
 - Fill handle: drag to continue series (1, 2, 3 → 4, 5; Item 1 → Item 2; Mon → Tue; Jan → Feb) and copy formulas with shifted references
 - Formatting: bold, italic, underline, strikethrough, text and fill colours, alignment, number formats (₹ with Indian grouping, $, %, dates, times)
 - Typing `18%`, `₹1,500` or `15-08-2025` sets the matching format automatically
 - Insert/delete rows and columns (formulas are rewritten), sort, find & replace, Go To, zoom, right-click menu
 - Paste Special: values only, formatting only, formulas only, transpose
-- Open and save **.xlsx** (values, formulas, formatting, column widths) and **.csv**
+- Cell layout: borders, fonts, wrap text, merge & center, row heights, hide/unhide, freeze panes
+- Data tools: filter dropdowns, custom sort, remove duplicates, data validation (dropdown lists, limits, alerts), conditional formatting (highlight rules, data bars, colour scales)
+- Charts (column, bar, line, area, pie, doughnut, scatter) that update live with the data, and pictures; move, resize, titles, legend, data labels, colours
+- Open and save **.xlsx** (values, formulas, formatting, layout, data tools, charts, pictures) and **.csv**
 - Multiple sheets (add, rename, delete), undo/redo for everything, autosave in the browser
 - Copy/paste with Excel and Google Sheets; inside Office, paste keeps formulas and formatting
 - Typing in any language, including IME input (Hindi, Chinese, Japanese…)
@@ -39,6 +47,7 @@ See the [roadmap](docs/ROADMAP.md).
 | Enter / Tab (Shift to reverse) | Confirm and move |
 | Alt + Enter | New line inside the cell |
 | Ctrl/⌘ + Enter | Put the entry in every selected cell |
+| F4 (while typing a formula) | Cycle `$A$1` → `A$1` → `$A1` → `A1` |
 | Escape | Cancel edit (or close the suggestion list) |
 | Arrows while typing a formula after `(`, `,` or an operator | Insert a reference (Shift extends it) |
 | ↑ ↓ then Tab/Enter in the suggestion list | Pick a function |
@@ -50,6 +59,9 @@ See the [roadmap](docs/ROADMAP.md).
 | Ctrl/⌘ + D / R | Fill down / right within the selection |
 | Ctrl/⌘ + F / Ctrl + H | Find / Find and replace |
 | Ctrl/⌘ + mouse wheel | Zoom |
+| Ctrl/⌘ + Shift + L | Filter on/off |
+| Alt + ↓ | Open the cell's dropdown list or the column's filter |
+| Delete (chart or picture selected) | Delete it; arrows nudge it, Esc goes back to the cells |
 | Drag the fill handle (hold Ctrl/⌥ to count up from a single number) | Fill a series |
 | Double-click the fill handle | Fill down to the end of the neighbouring column |
 | Drag / double-click a column border | Resize / autofit a column |
