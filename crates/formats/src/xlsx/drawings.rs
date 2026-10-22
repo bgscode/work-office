@@ -158,6 +158,21 @@ impl DrawingWriter {
         insert_drawing_element(worksheet_xml)
     }
 
+    /// Add a part written by another feature (notes), with its content type override.
+    pub(super) fn add_part(&mut self, name: String, xml: String, content_type: Option<&str>) {
+        if let Some(ct) = content_type {
+            self.content_types.push(format!(r#"<Override PartName="/{name}" ContentType="{ct}"/>"#));
+        }
+        self.parts.push((name, xml));
+    }
+
+    /// Register a file extension's default content type (e.g. `vml`).
+    pub(super) fn add_extension(&mut self, ext: &'static str) {
+        if !self.extensions.contains(&ext) {
+            self.extensions.push(ext);
+        }
+    }
+
     /// Add the collected parts to the package, registering their content types.
     /// Sheet relationship parts that another feature already wrote are merged.
     pub(super) fn finish(self, parts: &mut Vec<(String, String)>) -> Vec<(String, Arc<[u8]>)> {
@@ -167,6 +182,7 @@ impl DrawingWriter {
                 "jpeg" => "image/jpeg",
                 "gif" => "image/gif",
                 "bmp" => "image/bmp",
+                "vml" => "application/vnd.openxmlformats-officedocument.vmlDrawing",
                 _ => "image/png",
             };
             defaults.push_str(&format!(r#"<Default Extension="{ext}" ContentType="{mime}"/>"#));
@@ -197,14 +213,7 @@ impl DrawingWriter {
 /// Insert `<drawing r:id="rIdDrawing1"/>` where the schema wants it (after
 /// most worksheet elements, before legacy drawings, tables and extensions),
 /// declaring the relationships namespace on the root if needed.
-fn insert_drawing_element(mut xml: String) -> String {
-    if let Some(root) = xml.find("<worksheet") {
-        let tag_end = xml[root..].find('>').map(|i| root + i).unwrap_or(xml.len());
-        if !xml[root..tag_end].contains("xmlns:r=") {
-            xml.insert_str(tag_end, &format!(r#" xmlns:r="{NS_REL}""#));
-        }
-    }
-    let element = r#"<drawing r:id="rIdDrawing1"/>"#;
+fn insert_drawing_element(xml: String) -> String {
     let before = [
         "<legacyDrawing",
         "<legacyDrawingHF",
@@ -216,6 +225,19 @@ fn insert_drawing_element(mut xml: String) -> String {
         "<extLst",
         "</worksheet>",
     ];
+    insert_sheet_element(xml, r#"<drawing r:id="rIdDrawing1"/>"#, &before)
+}
+
+/// Insert `element` into worksheet XML before the first of the `before` tags
+/// (the schema fixes the order of a worksheet's children), declaring the
+/// relationships namespace on the root if needed.
+pub(super) fn insert_sheet_element(mut xml: String, element: &str, before: &[&str]) -> String {
+    if let Some(root) = xml.find("<worksheet") {
+        let tag_end = xml[root..].find('>').map(|i| root + i).unwrap_or(xml.len());
+        if !xml[root..tag_end].contains("xmlns:r=") {
+            xml.insert_str(tag_end, &format!(r#" xmlns:r="{NS_REL}""#));
+        }
+    }
     let pos = before.iter().filter_map(|tag| xml.find(tag)).min().unwrap_or(xml.len());
     xml.insert_str(pos, element);
     xml
@@ -626,7 +648,7 @@ pub(super) fn chart_xml(chart: &Chart, own: &str, sheets: &dyn SheetLookup) -> S
 
 // ---------------------------------------------------------------- reading
 
-fn part_bytes(zip: &mut ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<Option<Vec<u8>>> {
+pub(super) fn part_bytes(zip: &mut ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<Option<Vec<u8>>> {
     let mut file = match zip.by_name(name) {
         Ok(f) => f,
         Err(zip::result::ZipError::FileNotFound) => return Ok(None),
@@ -637,12 +659,12 @@ fn part_bytes(zip: &mut ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<Option<
     Ok(Some(out))
 }
 
-fn part_text(zip: &mut ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<Option<String>> {
+pub(super) fn part_text(zip: &mut ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<Option<String>> {
     Ok(part_bytes(zip, name)?.map(|b| String::from_utf8_lossy(&b).into_owned()))
 }
 
 /// `xl/worksheets/sheet1.xml` -> `xl/worksheets/_rels/sheet1.xml.rels`.
-fn rels_path(part: &str) -> String {
+pub(super) fn rels_path(part: &str) -> String {
     match part.rsplit_once('/') {
         Some((dir, file)) => format!("{dir}/_rels/{file}.rels"),
         None => format!("_rels/{part}.rels"),
@@ -650,7 +672,7 @@ fn rels_path(part: &str) -> String {
 }
 
 /// Resolve a relationship target relative to the part that references it.
-fn resolve(from_part: &str, target: &str) -> String {
+pub(super) fn resolve(from_part: &str, target: &str) -> String {
     if let Some(abs) = target.strip_prefix('/') {
         return abs.to_string();
     }

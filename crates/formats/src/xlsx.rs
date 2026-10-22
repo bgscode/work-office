@@ -33,6 +33,7 @@ use sheets_engine::{BorderLine, BorderStyle, Borders, Range, Side};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
+mod annotations;
 mod drawings;
 use crate::xml::{attr, walk, XmlEvent};
 
@@ -149,6 +150,9 @@ pub fn read(bytes: &[u8]) -> Result<Workbook> {
         let data = sheet_data(&xml, &shared, &dxfs);
         // Page setup is in <sheetPr> before the cells and after </sheetData>;
         // read those parts only, not the cells again.
+        let tail = xml.rfind("</sheetData>").map_or("", |b| &xml[b..]);
+        let has_extras = tail.contains("<hyperlink") || tail.contains("<legacyDrawing");
+        let extras_tail = if has_extras { tail.to_string() } else { String::new() };
         let (page_setup, tab) = match (xml.find("<sheetData"), xml.rfind("</sheetData>")) {
             (Some(a), Some(b)) if a < b => {
                 (page_setup::read_sheet(&format!("{}{}", &xml[..a], &xml[b..])), tab_color(&xml[..a]))
@@ -172,6 +176,9 @@ pub fn read(bytes: &[u8]) -> Result<Workbook> {
         *sheet.layout_mut() = data.layout;
         data_tools::apply(&mut sheet, data.tools);
         drawings::read_sheet_drawings(&mut zip, &resolve(&rel.target), &name, &mut sheet)?;
+        if has_extras {
+            annotations::read_sheet(&mut zip, &resolve(&rel.target), &extras_tail, &mut sheet)?;
+        }
         let load = timer.lap();
         Timer::report(|| format!("{name}: unzip {unzip}, parse {parse} ({cells} cells), load+calc {load}"));
         let index = book.push_sheet(name, sheet);
@@ -770,7 +777,8 @@ pub fn write(book: &Workbook) -> Result<Vec<u8>> {
             r#"<Relationship Id="rId{id}" Type="{NS_REL}/worksheet" Target="worksheets/sheet{id}.xml"/>"#
         ));
         let sheet_xml = drawing_parts.add_sheet(id, book, i, worksheet_xml(&ws.sheet, &mut styles, &mut strings));
-        let mut sheet_xml = page_setup::insert_into_worksheet(sheet_xml, &ws.page_setup);
+        let sheet_xml = page_setup::insert_into_worksheet(sheet_xml, &ws.page_setup);
+        let mut sheet_xml = annotations::write_sheet(id, &ws.sheet, sheet_xml, &mut drawing_parts);
         if let Some(color) = &ws.tab_color {
             let rgb = format!(r#"<tabColor rgb="FF{}"/>"#, color.trim_start_matches('#').to_ascii_uppercase());
             sheet_xml = page_setup::insert_sheet_pr(sheet_xml, &rgb, true);

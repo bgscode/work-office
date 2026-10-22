@@ -99,6 +99,16 @@ cross-sheet links, so changing a named range's cells recalculates them; `SetName
 (undoable) recalculates them all. Sheet renames, deletes and row/column
 inserts rewrite `refers_to` with the same `refs.rs` helpers formulas use.
 
+## Notes and hyperlinks
+
+`Sheet::annotations` (`annotations.rs`) maps cells to their `Note` and
+`Hyperlink`. They are remapped with the cells on row/column inserts, deletes and
+sorts; `SetNotes` / `SetHyperlinks` change them undoably. A link's target is a
+URL, `mailto:`, or `#Sheet2!A1` for a place in the workbook; the UI refuses
+script URLs (`linkDestination`). In .xlsx, notes are `commentsN.xml` plus the VML
+drawing Excel needs to show them (`xlsx/annotations.rs`), links are `<hyperlinks>`
+with external relationships.
+
 ## Kinds of edits
 
 | Edit | Engine op | Undo |
@@ -114,6 +124,7 @@ inserts rewrite `refers_to` with the same `refs.rs` helpers formulas use.
 | Remove duplicates, custom sort, sort from a filter | `ReplaceSheet` | the old sheet |
 | Add/rename/delete/move sheet | `InsertSheet`, `RenameSheet`, `RemoveSheet`, `MoveSheet` | the inverse op |
 | Tab colour, hide/unhide sheet | `SetSheetTab` | the previous colour and state |
+| Notes, hyperlinks | `SetNotes`, `SetHyperlinks` | the previous notes / links of those cells |
 
 ## Design rules
 

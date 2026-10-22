@@ -4,6 +4,7 @@
 //! panes, AutoFilter, data validation, conditional formatting, charts,
 //! pictures and page setup.
 
+use sheets_engine::annotations::{Hyperlink, Note};
 use sheets_engine::borders::{BorderLine, BorderStyle};
 use sheets_engine::chart::{self, Anchor, AnchorPoint, ChartType, DrawingContent, Image};
 use sheets_engine::conditional_format::rule_from_spec;
@@ -128,6 +129,17 @@ fn build() -> Workbook {
     p.set("gridlines", "1").unwrap();
     p.set("footer", "&CPage &P of &N").unwrap();
     book.sheets[0].tab_color = Some("#C00000".into());
+    let a = book.sheets[0].sheet.annotations_mut();
+    a.notes.insert(
+        at("B2"),
+        Note { author: "Asha Rao".into(), text: "Includes GST.\nCheck with <accounts> & tax".into() },
+    );
+    a.notes.insert(at("C9"), Note { author: String::new(), text: "No author".into() });
+    a.links.insert(
+        at("A1"),
+        Hyperlink { target: "https://example.com/a?b=1&c=2".into(), tooltip: "Open the site".into() },
+    );
+    a.links.insert(at("A2"), Hyperlink { target: "#'Data 2025'!B4".into(), tooltip: String::new() });
     book.sheets[1].hidden = true;
     book
 }
@@ -175,6 +187,9 @@ fn everything_round_trips() {
 
     // Page setup.
     assert_eq!(a.page_setup, b.page_setup);
+
+    // Notes and hyperlinks.
+    assert_eq!(a.sheet.annotations(), b.sheet.annotations());
 
     // Sheet tabs.
     assert_eq!(b.tab_color.as_deref(), Some("#C00000"));

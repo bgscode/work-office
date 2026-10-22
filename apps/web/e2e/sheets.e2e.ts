@@ -384,3 +384,40 @@ test("sheet tabs: drag to reorder, copy, colour, hide and unhide", async ({ page
   await expect(tabs).toHaveText(["Sheet3", "Sheet1", "Sheet2", "Sheet1 (2)"]);
   await expectNoErrors(errors);
 });
+
+test("notes and hyperlinks", async ({ page }) => {
+  const { errors, cell } = await openWorkbook(page);
+  await clickCell(page, await cell(0, 0));
+  await typeRows(page, TABLE);
+  // Shift+F2 on B2: a note box opens; the first time it asks for your name.
+  await clickCell(page, await cell(1, 1));
+  await page.keyboard.press("Shift+F2");
+  await page.getByLabel("Your name").fill("Asha");
+  await page.getByLabel("Note", { exact: true }).fill("Includes GST");
+  await clickCell(page, await cell(6, 4));
+  // Hovering B2 shows the note.
+  const b2 = await cell(1, 1);
+  await page.mouse.move(b2.x, b2.y);
+  await expect(page.locator(".note-popup")).toContainText("Asha:Includes GST");
+  // Ctrl+K on A6: a link to C10 on this sheet.
+  await clickCell(page, await cell(5, 0));
+  await page.keyboard.press("Control+k");
+  await page.getByRole("tab", { name: "Place in This Document" }).click();
+  await page.getByLabel("Cell reference").fill("C10");
+  await page.getByLabel("Text to display").fill("Go to totals");
+  await page.locator(".dialog-footer").getByRole("button", { name: "OK" }).click();
+  await clickCell(page, await cell(5, 0));
+  await expect(page.getByRole("textbox", { name: /Name Box/ })).toHaveValue("C10");
+  await expect(formulaBar(page)).toHaveValue("");
+  await goTo(page, "A6");
+  await expect(formulaBar(page)).toHaveValue("Go to totals");
+  // Review → Delete removes the note.
+  await goTo(page, "B2");
+  await ribbonTab(page, "Review");
+  await ribbonCommand(page, "Delete");
+  const a1 = await cell(0, 0);
+  await page.mouse.move(a1.x, a1.y);
+  await page.mouse.move(b2.x, b2.y);
+  await expect(page.locator(".note-popup")).toHaveCount(0);
+  await expectNoErrors(errors);
+});

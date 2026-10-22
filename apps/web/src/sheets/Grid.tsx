@@ -34,6 +34,7 @@ import { isLineShape, type AnchorArray } from "./charts/types";
 import { FILL_HANDLE_SIZE, filterButtonBox, makePanes, paint, type SheetGeometry } from "./paint";
 import { Panes } from "./panes";
 import { FORMULA_BAR_ID, type EditState } from "./types";
+import { NoteEditor, readNote } from "./features/annotations";
 
 export type FillDirection = "down" | "up" | "right" | "left";
 export type GridShortcut =
@@ -126,6 +127,13 @@ export interface GridProps {
   onShapeText: (id: number, text: string) => void;
   onChartTitle: (id: number, title: string) => void;
   editShapeText: { id: number; seq: number } | null;
+  /** A quick click on a cell with a hyperlink (Excel follows it; click and hold selects). */
+  onFollowLink: (row: number, col: number) => void;
+  /** Review → New/Edit Note: the cell whose note is being edited (a new `seq` reopens it). */
+  editNote: { row: number; col: number; seq: number } | null;
+  onNoteDone: (text: string, author: string) => void;
+  /** Review → Show All Notes. */
+  showAllNotes: boolean;
 }
 
 type Hit =
@@ -155,6 +163,8 @@ export function Grid(props: GridProps) {
   /** Rubber band while drawing a shape (viewport px, unzoomed). */
   const [drawPreview, setDrawPreview] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const [cursor, setCursor] = useState("cell");
+  /** The cell under the mouse, for its note or link tip. */
+  const [hover, setHover] = useState<Cell | null>(null);
   const pendingReveal = useRef<Cell | null>(null);
   const editingInCell = editing?.source === "cell";
 
@@ -542,8 +552,12 @@ export function Grid(props: GridProps) {
     const initial = e.shiftKey && hit.kind === "cell" ? { anchor: selection.anchor, focus: hit.cell } : span(hit.cell);
     select(initial, false);
 
+    // A quick click on a link follows it, like Excel; holding the button selects the cell.
+    const linkCell = hit.kind === "cell" && !e.shiftKey && !e.ctrlKey && !e.metaKey && doc.hyperlinkAt(sheet, hit.cell.row, hit.cell.col) ? hit.cell : null;
+    const downAt = performance.now();
     // Dragging moves the focus corner; row/column drags keep their full span.
-    drag((ev) => {
+    drag(
+      (ev) => {
       const { x, y } = local(ev);
       const c = cellAt(x, y);
       const focus =
@@ -555,14 +569,35 @@ export function Grid(props: GridProps) {
               ? initial.focus
               : c;
       select({ anchor: initial.anchor, focus }, false);
-    });
+      },
+      (ev) => {
+        if (!linkCell || performance.now() - downAt > 500) return;
+        const { x, y } = local(ev);
+        const c = cellAt(x, y);
+        if (c.row === linkCell.row && c.col === linkCell.col) props.onFollowLink(c.row, c.col);
+      },
+    );
   }
 
   function onHover(e: MouseEvent) {
     if (e.buttons) return;
     const hit = hitTest(e);
+    const over = hit.kind === "cell" && !hit.onScrollbar ? merges.cellRect(hit.cell) : null;
+    const cell = over && { row: over.top, col: over.left };
+    if (cell?.row !== hover?.row || cell?.col !== hover?.col) setHover(cell);
+    const onLink = cell && !props.pointMode && doc.hyperlinkAt(sheet, cell.row, cell.col);
     const next =
-      hit.kind === "resize" ? "col-resize" : hit.kind === "rowResize" ? "row-resize" : hit.kind === "fill" ? "crosshair" : hit.kind === "filter" ? "default" : "cell";
+      hit.kind === "resize"
+        ? "col-resize"
+        : hit.kind === "rowResize"
+          ? "row-resize"
+          : hit.kind === "fill"
+            ? "crosshair"
+            : hit.kind === "filter"
+              ? "default"
+              : onLink
+                ? "pointer"
+                : "cell";
     if (next !== cursor) setCursor(next);
   }
 
@@ -768,6 +803,7 @@ export function Grid(props: GridProps) {
         onScroll={onScroll}
         onMouseDown={onMouseDown}
         onMouseMove={onHover}
+        onMouseLeave={() => setHover(null)}
         onDoubleClick={onDoubleClick}
         onContextMenu={onContextMenu}
       >
@@ -864,6 +900,16 @@ export function Grid(props: GridProps) {
           </svg>
         </button>
       )}
+      {props.showAllNotes && <AllNotes doc={doc} sheet={sheet} revision={revision} panes={panes} geo={geo} zoom={zoom} />}
+      {props.editNote && (
+        <NoteEditor
+          key={`${sheet}:${props.editNote.row}:${props.editNote.col}:${props.editNote.seq}`}
+          note={readNote(doc, sheet, props.editNote.row, props.editNote.col)}
+          {...noteBoxAt(props.editNote, panes, geo, zoom)}
+          onDone={props.onNoteDone}
+        />
+      )}
+      {hover && !editing && !props.editNote && !(props.showAllNotes && readNote(doc, sheet, hover.row, hover.col)) && <CellTip doc={doc} sheet={sheet} revision={revision} cell={hover} panes={panes} geo={geo} zoom={zoom} />}
       {props.inputMessage && !editing && (
         <div className="input-message" role="tooltip" style={{ left: cellLeft + (areaW * zoom) / 2, top: cellTop + areaH * zoom + 6 }}>
           {props.inputMessage.title && <strong>{props.inputMessage.title}</strong>}
@@ -871,6 +917,70 @@ export function Grid(props: GridProps) {
         </div>
       )}
     </div>
+  );
+}
+
+/** Where a cell's note box goes: right of the cell, level with its top. */
+function noteBoxAt(cell: Cell, panes: Panes, geo: SheetGeometry, zoom: number) {
+  const area = geo.merges.cellRect(cell);
+  return {
+    left: (panes.colX(area.left) + geo.cols.x(area.right + 1) - geo.cols.x(area.left)) * zoom + 10,
+    top: panes.rowY(area.top) * zoom,
+  };
+}
+
+/** Review → Show All Notes: the notes of the cells in view. */
+function AllNotes({ doc, sheet, revision, panes, geo, zoom }: { doc: SheetsDocument; sheet: number; revision: number; panes: Panes; geo: SheetGeometry; zoom: number }) {
+  const rowBands = panes.rowBands();
+  const colBands = panes.colBands();
+  const first = { row: Math.min(...rowBands.map((b) => b.first)), col: Math.min(...colBands.map((b) => b.first)) };
+  const last = { row: Math.max(...rowBands.map((b) => b.last)), col: Math.max(...colBands.map((b) => b.last)) };
+  const cells = useMemo(() => {
+    const block = doc.notesBlock(sheet, first.row, first.col, last.row - first.row + 1, last.col - first.col + 1);
+    const out: { row: number; col: number; note: { author: string; text: string } }[] = [];
+    for (let i = 0; i < block.length; i += 2) {
+      const note = readNote(doc, sheet, block[i], block[i + 1]);
+      if (note) out.push({ row: block[i], col: block[i + 1], note });
+    }
+    return out;
+  }, [doc, sheet, revision, first.row, first.col, last.row, last.col]);
+  return (
+    <>
+      {cells.map(({ row, col, note }) => (
+        <div key={`${row}:${col}`} className="note-popup" role="note" style={noteBoxAt({ row, col }, panes, geo, zoom)}>
+          {note.author && <strong>{note.author}:</strong>}
+          {note.text}
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** The note (a yellow box beside the cell) or link tip for the cell under the mouse. */
+function CellTip({ doc, sheet, revision, cell, panes, geo, zoom }: { doc: SheetsDocument; sheet: number; revision: number; cell: Cell; panes: Panes; geo: SheetGeometry; zoom: number }) {
+  const { note, link } = useMemo(() => {
+    const n = doc.noteAt(sheet, cell.row, cell.col);
+    const l = doc.hyperlinkAt(sheet, cell.row, cell.col);
+    return { note: n ? (JSON.parse(n) as { author: string; text: string }) : null, link: l ? (JSON.parse(l) as { target: string; tooltip: string }) : null };
+    // revision: the note or link may have changed.
+  }, [doc, sheet, cell.row, cell.col, revision]);
+  const area = geo.merges.cellRect(cell);
+  const bottom = (panes.rowY(area.top) + geo.rows.y(area.bottom + 1) - geo.rows.y(area.top)) * zoom;
+  return (
+    <>
+      {note && (
+        <div className="note-popup" role="note" style={noteBoxAt(cell, panes, geo, zoom)}>
+          {note.author && <strong>{note.author}:</strong>}
+          {note.text}
+        </div>
+      )}
+      {link && !note && (
+        <div className="link-tip" role="tooltip" style={{ left: panes.colX(area.left) * zoom + 12, top: bottom + 4 }}>
+          {link.tooltip || link.target.replace(/^#/, "")}
+          <span>Click once to follow. Click and hold to select this cell.</span>
+        </div>
+      )}
+    </>
   );
 }
 

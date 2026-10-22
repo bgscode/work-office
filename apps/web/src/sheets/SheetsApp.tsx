@@ -65,6 +65,7 @@ import { Grid, fillArea, type FillDirection, type GridShortcut } from "./Grid";
 import { fontFor } from "./paint";
 import { NameBox } from "./NameBox";
 import { SheetTabs } from "./SheetTabs";
+import { LinkDialog, annotationMenuItems, clearMenuItems, insertLinkCommand, linkDestination, readLink, reviewCommands, type AnnotationContext } from "./features/annotations";
 import { MoveCopyDialog, TabColorDialog, UnhideDialog, moveTarget, nextVisible, readTabs } from "./features/sheetTabs";
 import type { EditState } from "./types";
 import { MOD_KEY, autoSumRange, insertFunctionText, statusMode, zoomToFit } from "./chrome";
@@ -157,6 +158,9 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
   /** Formulas → Name Manager / Define Name. */
   const [nameDialog, setNameDialog] = useState<"manager" | "define" | null>(null);
   const [showFormulas, setShowFormulas] = useState(false);
+  const [linkDialog, setLinkDialog] = useState(false);
+  const [noteEdit, setNoteEdit] = useState<{ row: number; col: number; seq: number } | null>(null);
+  const [showAllNotes, setShowAllNotes] = useState(false);
   // Files and printing: File → Print view, Page Setup dialog, a short "saved" note.
   const [printOpen, setPrintOpen] = useState(false);
   const [pageSetupTab, setPageSetupTab] = useState<PageSetupTab | null>(null);
@@ -752,6 +756,51 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
     return [sel.left, Math.min(sel.right, wholeRows ? Math.max(cols, sel.left + 1) - 1 : sel.right)];
   }
 
+  // ---- notes and hyperlinks
+
+  /** Open a cell's link: a web page in a new tab, or a place in the workbook. */
+  function followLink(r: number, c: number) {
+    const link = readLink(doc, sheet, r, c);
+    const dest = link && linkDestination(link.target);
+    if (!dest) {
+      if (link) setMessage({ title: "Hyperlink", message: "This link can't be opened." });
+      return;
+    }
+    if (dest.kind === "web") {
+      window.open(dest.href, "_blank", "noopener,noreferrer");
+      return;
+    }
+    const target = doc.referenceTarget(dest.ref, sheet);
+    if (target.length !== 5) {
+      setMessage({ title: "Hyperlink", message: `Reference isn't valid: ${dest.ref}` });
+      return;
+    }
+    if (editing) commit(0, 0);
+    if (target[0] !== sheet) setSheet(target[0]);
+    goTo({ anchor: { row: target[1], col: target[2] }, focus: { row: target[3], col: target[4] } });
+  }
+
+  const annotationCtx: AnnotationContext = {
+    doc,
+    sheet,
+    row,
+    col,
+    rect: sel,
+    changed,
+    editNote: () => {
+      if (editing) commit(0, 0);
+      setNoteEdit((n) => ({ row, col, seq: (n?.seq ?? 0) + 1 }));
+    },
+    openLinkDialog: () => {
+      if (editing) commit(0, 0);
+      setLinkDialog(true);
+    },
+    followLink,
+    goToCell: (r, c) => goTo(single({ row: r, col: c })),
+    showAllNotes,
+    setShowAllNotes,
+  };
+
   const layoutCtx: LayoutContext = {
     sel,
     merges: geo.merges,
@@ -1272,6 +1321,14 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       void saveWorkbook(true);
     } else if (e.key === "Escape" && drawingTool) {
       setDrawingTool(null);
+    } else if (mod && !e.altKey && !e.shiftKey && key === "k") {
+      // Ctrl+K: Insert Hyperlink.
+      e.preventDefault();
+      annotationCtx.openLinkDialog();
+    } else if (e.key === "F2" && e.shiftKey && !mod) {
+      // Shift+F2: New Note / Edit Note.
+      e.preventDefault();
+      annotationCtx.editNote();
     } else if (e.key === "F3" && e.shiftKey && !insertFunctionOpen) {
       e.preventDefault();
       openInsertFunction();
@@ -1365,6 +1422,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       { label: "Clear formatting", onRun: () => format("clear", "") },
       { label: "Format Cells…", shortcut: `${mod}1`, onRun: () => setFormatDialog("number") },
       { label: "Insert Function…", shortcut: "⇧F3", onRun: openInsertFunction, separatorBefore: true, icon: "function" },
+      ...annotationMenuItems(annotationCtx),
     ];
     setMenu({ x, y, items });
   }
@@ -1646,6 +1704,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
           menu: [
             { id: "clear-contents", label: "Clear Contents", shortcut: "Del", onRun: clear },
             { id: "clear-format", label: "Clear Formats", onRun: () => format("clear", "") },
+            ...clearMenuItems(annotationCtx),
           ],
         },
         {
@@ -1689,6 +1748,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
         { id: "del-rows", label: "Delete rows", title: "Delete the selected rows.", icon: "deleteRows", size: "small", group: "Cells", onRun: () => deleteLines("rows") },
         { id: "del-cols", label: "Delete columns", title: "Delete the selected columns.", icon: "deleteColumns", size: "small", group: "Cells", onRun: () => deleteLines("cols") },
         { id: "sheet", label: "New sheet", shortcut: "⇧F11", title: "Add a sheet after the last one.", icon: "insertSheet", size: "large", group: "Sheets", onRun: addSheet },
+        insertLinkCommand(annotationCtx),
       ],
     },
     {
@@ -1719,6 +1779,11 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       id: "data",
       label: "Data",
       commands: dataTabCommands(dataCtx),
+    },
+    {
+      id: "review",
+      label: "Review",
+      commands: reviewCommands(annotationCtx),
     },
     {
       id: "view",
@@ -1881,6 +1946,17 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
             goTo(single({ row: geo.rows.nextVisible(row + 1, 1) ?? row + 1, col: start.col }));
             return true;
           }}
+          onFollowLink={followLink}
+          editNote={noteEdit}
+          onNoteDone={(text, author) => {
+            if (noteEdit) {
+              doc.setNote(sheet, noteEdit.row, noteEdit.col, text, author);
+              changed();
+            }
+            setNoteEdit(null);
+            cellInputRef.current?.focus({ preventScroll: true });
+          }}
+          showAllNotes={showAllNotes}
         />
         {findMode && (
           <FindBar
@@ -1942,6 +2018,27 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       )}
       {insertFunctionOpen && <InsertFunctionDialog onInsert={closeInsertFunction} onClose={() => closeInsertFunction(null)} />}
       {renderDataDialog()}
+      {linkDialog && (
+        <LinkDialog
+          doc={doc}
+          current={readLink(doc, sheet, row, col)}
+          cellText={doc.input(sheet, row, col).startsWith("=") ? "" : doc.input(sheet, row, col)}
+          onApply={(target, display, tooltip) => {
+            // Whole rows or columns: only the cells with data (or just the active cell).
+            const r = dataRect() ?? { top: row, left: col, bottom: row, right: col };
+            doc.setHyperlink(sheet, r.top, r.left, r.bottom, r.right, target, display, tooltip);
+            changed();
+          }}
+          onRemove={() => {
+            doc.removeHyperlinks(sheet, sel.top, sel.left, sel.bottom, sel.right, false);
+            changed();
+          }}
+          onClose={() => {
+            setLinkDialog(false);
+            cellInputRef.current?.focus({ preventScroll: true });
+          }}
+        />
+      )}
       {tabDialog?.kind === "color" && (
         <TabColorDialog
           current={sheetTabs[tabDialog.index]?.color ?? null}

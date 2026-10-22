@@ -2324,3 +2324,70 @@ textarea.cell-editor {
 .dialog-list [role="option"].current {
   background: #cfe4d6;
 }
+
+/* Notes: Excel's yellow box beside the cell, and its editor. */
+.note-popup {
+  position: absolute;
+  z-index: 3;
+  width: 180px;
+  min-height: 60px;
+  padding: 4px 6px;
+  background: #ffffe1;
+  border: 1px solid #767676;
+  box-shadow: 1px 2px 4px rgba(0, 0, 0, 0.25);
+  font: 12px Tahoma, Segoe UI, sans-serif;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.note-popup strong {
+  display: block;
+}
+
+.note-editor {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  width: 200px;
+}
+
+.note-editor textarea,
+.note-editor .note-author {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  outline: none;
+  padding: 0;
+}
+
+.note-editor textarea {
+  min-height: 72px;
+  resize: both;
+}
+
+.note-editor .note-author {
+  font-weight: 700;
+  border-bottom: 1px dashed #b5b5a0;
+  margin-bottom: 2px;
+}
+
+/* A link's address under the cell while hovering, like Excel's ScreenTip. */
+.link-tip {
+  position: absolute;
+  z-index: 3;
+  max-width: 320px;
+  padding: 4px 8px;
+  background: #fff;
+  border: 1px solid #767676;
+  box-shadow: 1px 2px 4px rgba(0, 0, 0, 0.2);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.link-tip span {
+  display: block;
+  margin-top: 2px;
+  color: #666;
+}

@@ -26,6 +26,7 @@ use sheets_engine::{Align, CellRef, FindOptions, NumberFormat, Range, Sheet, Sty
 use sheets_engine::{BorderLine, BorderStyle, Side, VAlign};
 use wasm_bindgen::prelude::*;
 
+mod annotations;
 mod charts;
 
 mod data_tools;

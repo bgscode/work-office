@@ -14,6 +14,9 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Added
 
+- Notes: Review → New Note (Shift+F2) opens Excel's yellow note box beside the cell; cells with notes show a red triangle and their note on hover. Review → Delete, Previous Note, Next Note and Show All Notes; Home → Clear → Clear Notes; right-click → New/Edit/Delete Note. Notes move with their cells (insert, delete, sort) and are read from and saved to .xlsx (shown by Excel).
+- Hyperlinks: Insert → Link (Ctrl+K) to a web page, an e-mail address or a place in the workbook, with text to display and ScreenTip; the cell gets Excel's blue underlined link style. A click follows the link (click and hold selects the cell); right-click → Edit/Open/Remove Hyperlink; Home → Clear → Clear/Remove Hyperlinks. Saved in .xlsx. Script links (`javascript:`) never run.
+
 - Sheet tabs like Excel: drag a tab to move the sheet (Ctrl+drag copies it), Move or Copy… (with Create a copy), Tab Color…, Hide and Unhide… from the tab's right-click menu or Home → Format; Ctrl+PgUp/PgDn switch sheets. Copies are named `Sales (2)` and get their own copies of sheet-scoped names. Tab colours and hidden sheets are saved in .xlsx; hidden sheets don't print with the whole workbook.
 - Adding a sheet no longer copies the whole workbook in memory first (faster on big files).
 

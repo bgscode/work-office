@@ -80,8 +80,28 @@ impl SheetsDocument {
     /// or empty when it isn't a range (a constant or formula) or doesn't exist.
     #[wasm_bindgen(js_name = nameTarget)]
     pub fn name_target(&self, name: &str, sheet: usize) -> Vec<u32> {
-        let Some(d) = self.book.defined_name(name, sheet) else { return Vec::new() };
-        let (target, range) = match d.expr() {
+        match self.book.defined_name(name, sheet) {
+            Some(d) => self.cells_of(d.expr(), sheet),
+            None => Vec::new(),
+        }
+    }
+
+    /// Where a reference typed as text points (`Sheet2!B4`, `A1:C3`, or a
+    /// defined name), as `nameTarget` returns it: links to a place in the workbook.
+    #[wasm_bindgen(js_name = referenceTarget)]
+    pub fn reference_target(&self, text: &str, sheet: usize) -> Vec<u32> {
+        match sheets_engine::formula::parse(text.trim()) {
+            Ok(Expr::Name(name)) => self.name_target(&name, sheet),
+            Ok(expr) => self.cells_of(&expr, sheet),
+            Err(_) => Vec::new(),
+        }
+    }
+}
+
+impl SheetsDocument {
+    /// `[sheet, top, left, bottom, right]` of a reference expression, or empty.
+    fn cells_of(&self, expr: &Expr, sheet: usize) -> Vec<u32> {
+        let (target, range) = match expr {
             Expr::Ref(c) => (sheet, sheets_engine::Range::single(*c)),
             Expr::Range(r) => (sheet, *r),
             Expr::SheetRef(s, c) => match self.book.sheet_index(s) {

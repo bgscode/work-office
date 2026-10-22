@@ -31,8 +31,10 @@ When you finish an item, update its row in the same pull request.
 | Find & Replace (Ctrl+F / Ctrl+H, match case, whole cell, replace all) | ✅ | P1 | M1 |
 | Move cells by dragging the selection border | ⬜ | P2 | – |
 | AutoComplete text from the same column while typing | ⬜ | P2 | – |
-| Notes / comments on cells | ⬜ | P2 | – |
-| Hyperlinks in cells | ⬜ | P2 | – |
+| Notes on cells (Shift+F2, red triangle, hover, Review → Next/Previous/Show All), saved in .xlsx | ✅ | P2 | I4 |
+| Threaded comments (replies, @mentions) | ⬜ | P3 | – |
+| Hyperlinks (Ctrl+K): web, e-mail, place in the workbook; click to follow; saved in .xlsx | ✅ | P2 | I4 |
+| `HYPERLINK()` function | ⬜ | P3 | – |
 | Flash Fill (Ctrl+E) | ⬜ | P3 | – |
 | Spell check | ⬜ | P3 | – |
 

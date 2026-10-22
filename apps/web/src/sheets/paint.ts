@@ -277,6 +277,25 @@ function paintCells(ctx: CanvasRenderingContext2D, p: PaintInput, pane: Pane) {
       drawFilterButton(ctx, filterButtonBox(cell), f.columns.has(c), f.sort?.col === c ? f.sort.ascending : null);
     }
   }
+
+  // Notes: a red triangle in the top-right corner, like Excel.
+  const notes = doc.notesBlock(sheet, r0, c0, nRows, nCols);
+  if (notes.length) {
+    ctx.fillStyle = "#C00000";
+    for (let i = 0; i < notes.length; i += 2) {
+      const [r, c] = [notes[i], notes[i + 1]];
+      if (rows.isHidden(r) || cols.isHidden(c)) continue;
+      const area = merges.cellRect({ row: r, col: c });
+      const box = rect(area);
+      const right = box.x + box.w;
+      ctx.beginPath();
+      ctx.moveTo(right - 6, box.y);
+      ctx.lineTo(right, box.y);
+      ctx.lineTo(right, box.y + 6);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
 }
 
 /** Excel's filter button: a small raised box with a dropdown arrow, a funnel when filtering, an arrow when sorted. */

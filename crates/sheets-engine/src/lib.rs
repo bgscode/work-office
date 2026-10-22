@@ -12,6 +12,7 @@
 //!
 //! See `crates/sheets-engine/README.md` for a guided tour.
 
+pub mod annotations;
 pub mod borders;
 pub mod cell;
 pub mod chart;

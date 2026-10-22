@@ -244,6 +244,42 @@ const ICONS: Record<string, Paths> = {
     </>
   ),
   filter: () => <path d="M2.5 2.5h11l-4.25 5.5v5l-2.5 1.5V8z" {...s} />,
+  link: () => (
+    <>
+      <path d="M7 9.5a3 3 0 0 0 4.2 0l2.3-2.3a3 3 0 0 0-4.2-4.2L8.2 4" {...s} strokeWidth={1.3} />
+      <path d="M9 6.5a3 3 0 0 0-4.2 0L2.5 8.8A3 3 0 0 0 6.7 13l1.1-1" {...s} strokeWidth={1.3} />
+    </>
+  ),
+  note: () => (
+    <>
+      <path d="M2.5 2.5h11v8l-3 3h-8z" {...s} fill="#FFF7C2" />
+      <path d="M10.5 13.5v-3h3M5 6h6M5 8.5h4" {...s} />
+    </>
+  ),
+  noteDelete: () => (
+    <>
+      <path d="M2.5 2.5h11v5M2.5 2.5v11h5" {...s} fill="#FFF7C2" />
+      <path d="m10 10 4 4m0-4-4 4" {...s} stroke={RED} strokeWidth={1.4} />
+    </>
+  ),
+  notePrevious: () => (
+    <>
+      <path d="M5.5 2.5h8v8l-3 3h-5z" {...s} fill="#FFF7C2" />
+      <path d="M4 8H1.5m0 0L3 6.5M1.5 8 3 9.5" {...s} stroke={BLUE} strokeWidth={1.3} />
+    </>
+  ),
+  noteNext: () => (
+    <>
+      <path d="M2.5 2.5h8v8l-3 3h-5z" {...s} fill="#FFF7C2" />
+      <path d="M12 8h2.5m0 0L13 6.5M14.5 8 13 9.5" {...s} stroke={BLUE} strokeWidth={1.3} />
+    </>
+  ),
+  showNotes: () => (
+    <>
+      <path d="M1.5 4.5h9v7l-2 2h-7z" {...s} fill="#FFF7C2" />
+      <path d="M4.5 1.5h10v8" {...s} />
+    </>
+  ),
   find: () => (
     <>
       <circle cx="6.5" cy="6.5" r="4" {...s} />

@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 // hash-flooding resistance doesn't matter for a document's own cells.
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
+use crate::annotations::Annotations;
 use crate::cell::{CellRef, Range, MAX_COLS, MAX_ROWS};
 use crate::chart::Drawings;
 use crate::fill::{self, FillDirection};
@@ -166,6 +167,8 @@ pub struct Sheet {
     layout: SheetLayout,
     /// AutoFilter, data validation and conditional formatting (see `data_tools.rs`).
     pub(crate) tools: crate::data_tools::DataTools,
+    /// Notes and hyperlinks (see `annotations.rs`).
+    annotations: Annotations,
     /// Dynamic arrays: formula cell -> the area its result fills and the values.
     spills: HashMap<CellRef, Spill>,
     /// Every cell a spill fills (except its formula cell) -> that formula cell.
@@ -384,6 +387,14 @@ impl Sheet {
     }
 
     /// Charts and pictures on this sheet, back to front.
+    pub fn annotations(&self) -> &Annotations {
+        &self.annotations
+    }
+
+    pub fn annotations_mut(&mut self) -> &mut Annotations {
+        &mut self.annotations
+    }
+
     pub fn drawings(&self) -> &Drawings {
         &self.drawings
     }
@@ -688,6 +699,7 @@ impl Sheet {
             }
         }
         out.drawings = self.drawings.remapped(axis, map);
+        out.annotations = self.annotations.remapped(axis, map, limit);
         let edits: Vec<_> = self
             .cells
             .iter()
@@ -725,6 +737,8 @@ impl Sheet {
             ..Sheet::new()
         };
         out.drawings = self.drawings.clone();
+        out.annotations =
+            self.annotations.moved(|at| if in_range(at) { CellRef::new(new_row_of[&at.row], at.col) } else { *at });
         for (at, style) in &self.styles {
             let to = if in_range(at) { CellRef::new(new_row_of[&at.row], at.col) } else { *at };
             out.styles.insert(to, style.clone());
