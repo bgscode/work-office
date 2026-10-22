@@ -1,0 +1,44 @@
+{
+  "productName": "Work Docs",
+  "mainBinaryName": "work-docs",
+  "identifier": "com.bgscode.workdocs",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Work Docs",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 760,
+        "minHeight": 480,
+        "dragDropEnabled": false,
+        "url": "index.html?app=docs",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 14,
+          "y": 14
+        }
+      }
+    ]
+  },
+  "bundle": {
+    "icon": [
+      "icons/docs/32x32.png",
+      "icons/docs/128x128.png",
+      "icons/docs/128x128@2x.png",
+      "icons/docs/icon.icns",
+      "icons/docs/icon.ico"
+    ],
+    "shortDescription": "Documents (in development)",
+    "longDescription": "Work Docs is part of Work Office, a free, open-source office suite. It is in development and updates itself as it grows.",
+    "fileAssociations": []
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/bgscode/work-office/releases/latest/download/work-docs.json"
+      ]
+    }
+  }
+}

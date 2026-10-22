@@ -1,62 +1,110 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Work Office",
+  "productName": "Work Sheets",
   "version": "0.1.0",
-  "identifier": "com.bgscode.workoffice",
+  "identifier": "com.bgscode.worksheets",
   "build": {
     "frontendDist": "../../web/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": { "script": "pnpm build:wasm && pnpm --filter @office/web dev", "cwd": "../..", "wait": false },
-    "beforeBuildCommand": { "script": "pnpm build:wasm && pnpm --filter @office/web build", "cwd": "../.." }
+    "beforeDevCommand": {
+      "script": "pnpm build:wasm && pnpm --filter @office/web dev",
+      "cwd": "../..",
+      "wait": false
+    },
+    "beforeBuildCommand": {
+      "script": "pnpm build:wasm && pnpm --filter @office/web build",
+      "cwd": "../.."
+    }
   },
   "app": {
     "withGlobalTauri": true,
     "windows": [
       {
         "label": "main",
-        "title": "Work Office",
+        "title": "Work Sheets",
         "width": 1280,
         "height": 820,
         "minWidth": 760,
         "minHeight": 480,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "url": "index.html?app=sheets",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 14,
+          "y": 14
+        }
       }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
     "targets": "all",
     "category": "Productivity",
-    "shortDescription": "Open-source spreadsheets that open and save Excel files",
-    "longDescription": "Work Office is a free, open-source office suite. Sheets opens and saves .xlsx and .csv files with formulas, formatting, charts, filters and more.",
+    "shortDescription": "Spreadsheets that open and save Excel files",
+    "longDescription": "Work Sheets is part of Work Office, a free, open-source office suite. It opens and saves .xlsx and .csv files with formulas, formatting, charts, filters and more.",
     "license": "MIT OR Apache-2.0",
     "homepage": "https://github.com/bgscode/work-office",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "icon": [
+      "icons/sheets/32x32.png",
+      "icons/sheets/128x128.png",
+      "icons/sheets/128x128@2x.png",
+      "icons/sheets/icon.icns",
+      "icons/sheets/icon.ico"
+    ],
     "fileAssociations": [
       {
-        "ext": ["xlsx"],
+        "ext": [
+          "xlsx"
+        ],
         "name": "Excel Workbook",
         "description": "Excel Workbook",
         "role": "Editor",
         "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
       },
       {
-        "ext": ["csv"],
+        "ext": [
+          "csv"
+        ],
         "name": "CSV File",
         "description": "Comma-separated values",
         "role": "Editor",
         "mimeType": "text/csv"
       },
       {
-        "ext": ["tsv"],
+        "ext": [
+          "tsv"
+        ],
         "name": "TSV File",
         "description": "Tab-separated values",
         "role": "Editor",
         "mimeType": "text/tab-separated-values"
       }
     ],
-    "macOS": { "signingIdentity": "-", "minimumSystemVersion": "10.15" },
-    "linux": { "deb": { "section": "office" } }
+    "macOS": {
+      "signingIdentity": "-",
+      "minimumSystemVersion": "10.15"
+    },
+    "linux": {
+      "deb": {
+        "section": "office"
+      }
+    },
+    "createUpdaterArtifacts": false
+  },
+  "mainBinaryName": "work-sheets",
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYxMDA4MzNDM0Y5REQ4RTQKUldUazJKMC9QSU1BOFNyZEhIVmZJemdXUkkyMENnNlZCQnp6bWJuTG5RcUhJb2pTSFo2cGxvYXEK",
+      "endpoints": [
+        "https://github.com/bgscode/work-office/releases/latest/download/work-sheets.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

@@ -2391,3 +2391,14 @@ textarea.cell-editor {
   margin-top: 2px;
   color: #666;
 }
+
+/* macOS desktop app: the window's close/minimise/zoom buttons sit on our title bar. */
+.mac-desktop .title-bar {
+  padding-left: 76px;
+  user-select: none;
+}
+
+.mac-desktop .home-top {
+  padding-left: 84px;
+  user-select: none;
+}

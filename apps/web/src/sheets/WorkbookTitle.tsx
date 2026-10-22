@@ -48,7 +48,7 @@ export function WorkbookTitle(props: Props) {
   }
 
   return createPortal(
-    <div className="workbook-title">
+    <div className="workbook-title" data-tauri-drag-region>
       <div className="quick-access" role="toolbar" aria-label="Quick Access Toolbar">
         <Tooltip label="Save a copy (.xlsx)" description="Download this workbook as an Excel file.">
           <button aria-label="Save a copy" onMouseDown={(e) => e.preventDefault()} onClick={props.onSave}>
@@ -66,7 +66,7 @@ export function WorkbookTitle(props: Props) {
           </button>
         </Tooltip>
       </div>
-      <div className="file-title">
+      <div className="file-title" data-tauri-drag-region>
         {draft === null ? (
           <button
             className="file-name"

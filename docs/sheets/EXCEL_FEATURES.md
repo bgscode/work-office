@@ -168,7 +168,8 @@ When you finish an item, update its row in the same pull request.
 | Dark mode | ⬜ | P2 | – |
 | Hindi UI (and other languages) | ⬜ | P2 | – |
 | Desktop app (Tauri) for macOS, Windows, Linux; opens .xlsx/.csv from Finder/Explorer, saves back | ✅ | P2 | D1 |
-| Signed installers, auto-update | ⬜ | P2 | – |
+| Auto-update | ✅ | P2 | D1 |
+| Signed installers (Apple notarization, Windows code signing) | ⬜ | P2 | – |
 | Touch / mobile | ⬜ | P2 | – |
 | Screen reader support | ⬜ | P2 | – |
 

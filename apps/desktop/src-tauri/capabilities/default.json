@@ -1,7 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window: core APIs (events) for the web app. File access goes through the app's own commands in src/lib.rs.",
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "description": "The main window: core APIs (events) for the web app, and dragging the window by the app's title bar (macOS has no separate one). File access goes through the app's own commands in src/lib.rs.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize"
+  ]
 }

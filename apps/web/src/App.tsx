@@ -5,6 +5,8 @@ import { loadEngine } from "@office/engine";
 import { TitleBar } from "./chrome/TitleBar";
 import { TitleSlot } from "./chrome/titleSlot";
 import { isDesktop, onFilesOpened, takeOpenedFiles } from "./desktop";
+import { edition } from "./edition";
+import { APPS } from "./chrome/AppIcon";
 import { newDocumentId, type AppKind, type RecentDocument } from "./documents";
 import { rememberOpenedFile } from "./files";
 import { ComingSoon } from "./home/ComingSoon";
@@ -59,6 +61,15 @@ export function App() {
     openAll();
     return onFilesOpened(openAll);
   }, []);
+
+  // The Work Docs / Work Slides desktop apps until those apps exist.
+  if (edition && !APPS[edition].available) {
+    return (
+      <div className="shell">
+        <ComingSoon app={edition} />
+      </div>
+    );
+  }
 
   if (route.page === "home") {
     return <HomePage onOpenDocument={openDocument} onNew={newDocument} onOpenFile={openFile} />;

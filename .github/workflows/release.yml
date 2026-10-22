@@ -1,9 +1,15 @@
 name: Release
 
-# Builds the desktop app for macOS (Apple silicon + Intel), Windows and Linux
-# and attaches the installers to a GitHub Release.
-# Start it by pushing a version tag:  git tag v0.1.0 && git push origin v0.1.0
-# or from the Actions tab (Run workflow) with a tag name.
+# Builds the desktop apps — Work Sheets, Work Docs, Work Slides — for macOS
+# (Apple silicon + Intel), Windows and Linux, and publishes them as a GitHub
+# Release. Installed apps check the latest release and update themselves.
+#
+# Start it by pushing a version tag:  git tag v0.2.0 && git push origin v0.2.0
+# (or Actions → Release → Run workflow with a tag). The version comes from the tag.
+#
+# Auto-update needs the repository secrets TAURI_SIGNING_PRIVATE_KEY and
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD (see docs/RELEASING.md). Without them the
+# apps are still built, but can't update themselves.
 
 on:
   push:
@@ -11,27 +17,63 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v0.1.0)"
+        description: "Release tag (e.g. v0.2.0)"
         required: true
 
 permissions:
   contents: write
 
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
 jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      id: ${{ steps.release.outputs.id }}
+    steps:
+      - id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Work Office $TAG" --notes "$(cat <<'NOTES'
+          Download **Work Office** for your computer:
+
+          - **macOS** (Apple silicon and Intel): `Work.Office_*_universal.dmg` has all three apps — Work Sheets, Work Docs and Work Slides. Each app also has its own `.dmg`.
+          - **Windows**: `Work.Sheets_*_x64-setup.exe` (and the same for Docs and Slides), or the `.msi` files
+          - **Linux**: `.AppImage` (any distribution, updates itself), `.deb` (Ubuntu/Debian) or `.rpm` (Fedora)
+
+          Installed apps update themselves: they check for a new version when they start.
+
+          The apps aren't signed by Apple or Microsoft yet. On macOS, if it says an app is damaged or can't be checked, run `xattr -cr "/Applications/Work Sheets.app"` once (same for the other apps), or right-click → Open. On Windows, choose More info → Run anyway.
+          NOTES
+          )"
+          echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id)" >> "$GITHUB_OUTPUT"
+
   desktop:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
+        app: [sheets, docs, slides]
+        platform: [macos-latest, windows-latest, ubuntu-22.04]
         include:
           - platform: macos-latest
-            args: --target universal-apple-darwin
+            target: --target universal-apple-darwin
             rust_targets: wasm32-unknown-unknown,aarch64-apple-darwin,x86_64-apple-darwin
           - platform: windows-latest
-            args: ""
+            target: ""
             rust_targets: wasm32-unknown-unknown
           - platform: ubuntu-22.04
-            args: ""
+            target: ""
             rust_targets: wasm32-unknown-unknown
+          - app: sheets
+            config: ""
+          - app: docs
+            config: --config src-tauri/tauri.docs.conf.json
+          - app: slides
+            config: --config src-tauri/tauri.slides.conf.json
+    name: ${{ matrix.app }} (${{ matrix.platform }})
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -61,24 +103,53 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
+      - name: Version and update signing for this release
+        run: node .github/scripts/release-config.mjs
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           tauriScript: pnpm tauri
-          args: ${{ matrix.args }}
-          tagName: ${{ github.event.inputs.tag || github.ref_name }}
-          releaseName: "Work Office ${{ github.event.inputs.tag || github.ref_name }}"
-          releaseBody: |
-            Download the installer for your computer:
+          args: ${{ matrix.target }} ${{ matrix.config }} --config src-tauri/tauri.release.conf.json
+          releaseId: ${{ needs.create-release.outputs.id }}
+          # Each app gets its own update manifest (next job), not tauri-action's shared latest.json.
+          includeUpdaterJson: false
 
-            - **macOS** (Apple silicon and Intel): `Work.Office_*_universal.dmg`
-            - **Windows**: `Work.Office_*_x64-setup.exe` (or the `.msi`)
-            - **Linux**: `.AppImage` (any distribution), `.deb` (Ubuntu/Debian) or `.rpm` (Fedora)
+  finish:
+    needs: desktop
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
-            The app isn't signed by Apple or Microsoft yet. On macOS, if it says the app is damaged
-            or can't be checked, run `xattr -cr "/Applications/Work Office.app"` once, or right-click → Open.
-            On Windows, choose More info → Run anyway. See the README's Install section.
-          releaseDraft: false
-          prerelease: false
+      - name: Update manifests (work-sheets.json, work-docs.json, work-slides.json)
+        run: node .github/scripts/updater-manifests.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: One macOS disk image with all three apps
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          mkdir -p dmgs bundle
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir dmgs --pattern 'Work.Sheets_*universal.dmg' --pattern 'Work.Docs_*universal.dmg' --pattern 'Work.Slides_*universal.dmg'
+          for dmg in dmgs/*.dmg; do
+            mount=$(mktemp -d)
+            hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg"
+            cp -R "$mount"/*.app bundle/
+            hdiutil detach "$mount"
+          done
+          ln -s /Applications bundle/Applications
+          out="Work.Office_${VERSION}_universal.dmg"
+          hdiutil create -volname "Work Office" -srcfolder bundle -ov -format UDZO "$out"
+          gh release upload "$TAG" "$out" --repo "$GITHUB_REPOSITORY" --clobber

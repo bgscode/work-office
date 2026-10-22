@@ -1,0 +1,44 @@
+{
+  "productName": "Work Slides",
+  "mainBinaryName": "work-slides",
+  "identifier": "com.bgscode.workslides",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Work Slides",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 760,
+        "minHeight": 480,
+        "dragDropEnabled": false,
+        "url": "index.html?app=slides",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 14,
+          "y": 14
+        }
+      }
+    ]
+  },
+  "bundle": {
+    "icon": [
+      "icons/slides/32x32.png",
+      "icons/slides/128x128.png",
+      "icons/slides/128x128@2x.png",
+      "icons/slides/icon.icns",
+      "icons/slides/icon.ico"
+    ],
+    "shortDescription": "Presentations (in development)",
+    "longDescription": "Work Slides is part of Work Office, a free, open-source office suite. It is in development and updates itself as it grows.",
+    "fileAssociations": []
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/bgscode/work-office/releases/latest/download/work-slides.json"
+      ]
+    }
+  }
+}

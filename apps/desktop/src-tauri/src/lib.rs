@@ -4,6 +4,10 @@
 //!
 //! The web page can only read and write files the user chose: ones the OS
 //! opened with this app, or picked in an Open/Save dialog (`Files::allowed`).
+//!
+//! The same code builds three apps — Work Sheets, Work Docs, Work Slides — from
+//! `tauri.conf.json` and the `tauri.<app>.conf.json` overlays. Each updates
+//! itself from GitHub Releases (`check_for_update`).
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -11,7 +15,8 @@ use std::sync::Mutex;
 
 use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use tauri_plugin_updater::UpdaterExt;
 
 const WORKBOOK_EXTENSIONS: &[&str] = &["xlsx", "csv", "tsv", "txt"];
 
@@ -171,6 +176,29 @@ fn percent_decode(s: &str) -> Result<String, String> {
     String::from_utf8(out).map_err(|e| e.to_string())
 }
 
+/// Look for a newer version on GitHub Releases; download it in the background,
+/// then offer to restart into it. The download is checked against the public
+/// key in tauri.conf.json, so only builds signed by the release workflow install.
+async fn check_for_update(app: AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(update) = app.updater()?.check().await? else { return Ok(()) };
+    let bytes = update.download(|_, _| {}, || {}).await?;
+    let name = app.package_info().name.clone();
+    let dialog = app
+        .dialog()
+        .message(format!(
+            "{name} {} is ready to install (you have {}).\n\nRestart now to update? Your recent files stay where they are.",
+            update.version, update.current_version
+        ))
+        .title(format!("Update {name}"))
+        .buttons(MessageDialogButtons::OkCancelCustom("Restart now".into(), "Later".into()));
+    let restart = tauri::async_runtime::spawn_blocking(move || dialog.blocking_show()).await?;
+    if restart {
+        update.install(bytes)?;
+        app.restart();
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -179,12 +207,23 @@ pub fn run() {
             open_paths(app, paths_in_args(&args, Path::new(&cwd)));
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(Files::default())
         .invoke_handler(tauri::generate_handler![opened_files, pick_file, read_file, save_file, save_file_as])
         .setup(|app| {
             let args: Vec<String> = std::env::args().collect();
             let cwd = std::env::current_dir().unwrap_or_default();
             open_paths(app.handle(), paths_in_args(&args, &cwd));
+            // Release builds keep themselves up to date; offline or failed checks try again next launch.
+            if !cfg!(debug_assertions) {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(err) = check_for_update(handle).await {
+                        eprintln!("update check failed: {err}");
+                    }
+                });
+            }
             Ok(())
         })
         .build(tauri::generate_context!())

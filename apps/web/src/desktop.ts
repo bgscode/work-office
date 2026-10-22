@@ -17,6 +17,15 @@ export function isDesktop(): boolean {
   return tauri() !== undefined;
 }
 
+/**
+ * The macOS desktop window has no title bar of its own: its close/minimise/zoom
+ * buttons sit on the app's title bar, which leaves room for them (`mac-desktop`
+ * class) and drags the window (`data-tauri-drag-region`).
+ */
+export function markMacDesktop() {
+  if (isDesktop() && /Mac/.test(navigator.userAgent)) document.documentElement.classList.add("mac-desktop");
+}
+
 /** Where each file read from disk came from, so Save can write back to it. */
 const paths = new WeakMap<File, string>();
 

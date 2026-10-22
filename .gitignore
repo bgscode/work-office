@@ -17,3 +17,4 @@ apps/web/playwright-report/
 
 # Tauri generated schemas
 apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/tauri.release.conf.json

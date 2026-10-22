@@ -1,7 +1,10 @@
-# Desktop app (Tauri)
+# Desktop apps (Tauri)
 
-Work Office for macOS, Windows and Linux: the web app (`apps/web`) in a native
-window, with the engine running as WebAssembly inside it.
+Work Sheets, Work Docs and Work Slides for macOS, Windows and Linux: the web app
+(`apps/web`) in a native window, with the engine running as WebAssembly inside
+it. `src-tauri/tauri.conf.json` is Work Sheets; `tauri.docs.conf.json` and
+`tauri.slides.conf.json` are overlays for the other apps (`--config`). See
+[docs/RELEASING.md](../../docs/RELEASING.md) for releases and auto-update.
 
 `src-tauri/src/lib.rs` adds what a browser can't do:
 
@@ -11,7 +14,10 @@ window, with the engine running as WebAssembly inside it.
   Linux pass them as arguments, and a second launch forwards them to the running
   window (single-instance plugin);
 - File → Open and Save As use the system dialogs; Save writes back to the opened
-  `.xlsx` file. The page can only read or write files the user opened or picked.
+  `.xlsx` file. The page can only read or write files the user opened or picked;
+- on macOS the window has no title bar of its own: the traffic lights sit on the
+  app's green bar, which drags the window (`data-tauri-drag-region`);
+- checks GitHub Releases for a signed update when it starts.
 
 The web side of this is `apps/web/src/desktop.ts`.
 

@@ -78,25 +78,29 @@ Opening the app shows a start page like Microsoft 365's: create a blank workbook
 
 ## Install
 
-Download the installer for your computer from the
-[latest release](https://github.com/bgscode/work-office/releases/latest):
+Work Office installs as separate apps — **Work Sheets**, **Work Docs** and **Work Slides**
+(Docs and Slides are in development and turn into the full apps through updates).
+Download them from the [latest release](https://github.com/bgscode/work-office/releases/latest):
 
 | Computer | File |
 |---|---|
-| macOS (Apple silicon and Intel) | `Work.Office_<version>_universal.dmg`: open it and drag **Work Office** to Applications |
-| Windows 10/11 | `Work.Office_<version>_x64-setup.exe` (or the `.msi`) |
+| macOS (Apple silicon and Intel) | `Work.Office_<version>_universal.dmg`: open it and drag the three apps to Applications |
+| Windows 10/11 | `Work.Sheets_<version>_x64-setup.exe` (and the same for Docs and Slides), or the `.msi` files |
 | Linux | `.AppImage` (any distribution: make it executable and run), `.deb` (Ubuntu/Debian) or `.rpm` (Fedora) |
+
+**Updates are automatic:** when an app starts it checks for a new version, downloads it in the
+background and asks to restart. (Linux `.deb`/`.rpm` installs update with the new package.)
 
 The installers aren't signed by Apple or Microsoft yet, so the first launch needs one extra step:
 
 - **macOS:** right-click the app → **Open**. If macOS says the app is damaged, run
-  `xattr -cr "/Applications/Work Office.app"` in Terminal once.
+  `xattr -cr "/Applications/Work Sheets.app"` in Terminal once (same for Docs and Slides).
 - **Windows:** in the SmartScreen prompt choose **More info → Run anyway**.
 
-**Make it the default app for spreadsheets:** on macOS, select any `.xlsx` file in Finder →
-**Get Info** (⌘I) → **Open with: Work Office** → **Change All…** (do the same for `.csv`).
-On Windows, right-click an `.xlsx` → **Open with → Choose another app → Work Office** →
-**Always**. Double-clicking a file then opens it in Work Office, and Ctrl+S / ⌘S saves back to it.
+**Make Work Sheets the default app for spreadsheets:** on macOS, select any `.xlsx` file in Finder →
+**Get Info** (⌘I) → **Open with: Work Sheets** → **Change All…** (do the same for `.csv`).
+On Windows, right-click an `.xlsx` → **Open with → Choose another app → Work Sheets** →
+**Always**. Double-clicking a file then opens it in Work Sheets, and Ctrl+S / ⌘S saves back to it.
 
 ## Quick start (developers)
 
@@ -120,14 +124,14 @@ pnpm --filter @office/desktop tauri build   # desktop app for this computer (app
 ```
 
 The desktop app also needs the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
-for your system. Pushing a tag like `v0.2.0` builds the installers for every system on GitHub
-Actions and publishes them as a release (`.github/workflows/release.yml`).
+for your system. Pushing a tag like `v0.3.0` builds the installers for every system on GitHub
+Actions and publishes them as a release; see [docs/RELEASING.md](docs/RELEASING.md).
 
 ## How it fits together
 
 ```
 apps/web            React UI: grid on <canvas>, formula bar, ribbon
-apps/desktop        Tauri desktop app (macOS, Windows, Linux) around apps/web
+apps/desktop        Tauri desktop apps (Work Sheets, Docs, Slides) around apps/web
 packages/engine     TypeScript wrapper around the WebAssembly build
 crates/wasm         wasm-bindgen bindings (thin layer)
 crates/sheets-engine  cells, formulas, dependency graph, recalculation

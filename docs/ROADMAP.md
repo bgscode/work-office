@@ -54,8 +54,8 @@ The detailed, feature-by-feature list (with priorities and milestones M1–M7) i
 
 ## Phase 4 — Desktop and cloud
 
-- ✅ Tauri desktop app (macOS, Windows, Linux): installers built by GitHub Actions, default app for .xlsx/.csv
-- Desktop: code signing (Apple notarization, Windows), auto-update, native engine instead of WebAssembly
+- ✅ Tauri desktop apps (Work Sheets, Docs, Slides) for macOS, Windows, Linux: installers built by GitHub Actions, default app for .xlsx/.csv, auto-update
+- Desktop: code signing (Apple notarization, Windows), native engine instead of WebAssembly
 - Server: accounts, file storage, sharing
 - Real-time co-editing (CRDT), comments, version history
 

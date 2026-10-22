@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { APPS, AppIcon } from "../chrome/AppIcon";
 import { listRecent, removeDocument, type AppKind, type RecentDocument } from "../documents";
 import { pickWorkbook } from "../files";
+import { edition, productName } from "../edition";
 
 interface Props {
   onOpenDocument: (doc: RecentDocument) => void;
@@ -13,7 +14,8 @@ interface Props {
   onOpenFile: (file: File) => void;
 }
 
-const APP_ORDER: AppKind[] = ["sheets", "docs", "slides"];
+/** The apps offered here: just this one in a desktop app (Work Sheets), all on the web. */
+const APP_ORDER: AppKind[] = edition ? [edition] : ["sheets", "docs", "slides"];
 
 function greeting(now: Date): string {
   const h = now.getHours();
@@ -41,7 +43,7 @@ export function HomePage({ onOpenDocument, onNew, onOpenFile }: Props) {
   const now = Date.now();
 
   useEffect(() => {
-    document.title = "Office";
+    document.title = productName;
     // Re-read after mount: a workbook being closed saves in its cleanup,
     // which runs after this page's first render.
     setRecent(listRecent());
@@ -50,7 +52,7 @@ export function HomePage({ onOpenDocument, onNew, onOpenFile }: Props) {
   const shown = useMemo(
     () =>
       recent.filter(
-        (d) => (filter === "all" || d.app === filter) && d.name.toLowerCase().includes(query.trim().toLowerCase()),
+        (d) => APP_ORDER.includes(d.app) && (filter === "all" || d.app === filter) && d.name.toLowerCase().includes(query.trim().toLowerCase()),
       ),
     [recent, query, filter],
   );
@@ -77,8 +79,8 @@ export function HomePage({ onOpenDocument, onNew, onOpenFile }: Props) {
       onDragLeave={(e) => e.currentTarget === e.target && setDragging(false)}
       onDrop={onDrop}
     >
-      <header className="home-top">
-        <span className="home-brand">Office</span>
+      <header className="home-top" data-tauri-drag-region>
+        <span className="home-brand" data-tauri-drag-region>{productName}</span>
         <label className="home-search">
           <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
             <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
@@ -86,7 +88,7 @@ export function HomePage({ onOpenDocument, onNew, onOpenFile }: Props) {
           </svg>
           <input type="search" placeholder="Search your files" aria-label="Search your files" value={query} onChange={(e) => setQuery(e.target.value)} />
         </label>
-        <span className="home-top-spacer" />
+        <span className="home-top-spacer" data-tauri-drag-region />
       </header>
 
       <div className="home-body">
