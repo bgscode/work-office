@@ -122,6 +122,7 @@ export interface GridProps {
   /** A shape was drawn: its box in sheet pixels; `flipV` for lines going up. */
   onDrawShape: (rect: Rect4, flipV: boolean) => void;
   onShapeText: (id: number, text: string) => void;
+  onChartTitle: (id: number, title: string) => void;
   editShapeText: { id: number; seq: number } | null;
 }
 
@@ -796,6 +797,7 @@ export function Grid(props: GridProps) {
           }}
           onContextMenu={props.onDrawingMenu}
           onShapeText={props.onShapeText}
+          onChartTitle={props.onChartTitle}
           editText={props.editShapeText}
           onWheel={(dx, dy) => scrollerRef.current?.scrollBy(dx, dy)}
           onKey={(e) => {

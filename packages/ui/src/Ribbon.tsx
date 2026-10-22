@@ -24,6 +24,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "./icons";
 
 export interface RibbonMenuItem {
@@ -242,6 +243,31 @@ export function Ribbon({
   const used = () => {
     if (collapsed) setFloating(false);
   };
+
+  // Narrow windows: like Excel, groups fold into one button each, from the
+  // right, until the tab fits. `squeeze` is how many are folded. It is worked
+  // out again (from none) when the tab or the window width changes.
+  const commandsRef = useRef<HTMLDivElement>(null);
+  const [squeeze, setSqueeze] = useState(0);
+  const groups = current ? groupCommands(current.commands) : [];
+  useLayoutEffect(() => setSqueeze(0), [current?.id]);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth !== width) {
+        width = el.clientWidth;
+        setSqueeze(0);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useLayoutEffect(() => {
+    const el = commandsRef.current;
+    if (el && el.scrollWidth > el.clientWidth + 1 && squeeze < groups.length) setSqueeze((n) => n + 1);
+  });
   const showPanel = !collapsed || floating;
   const panelId = `${baseId}-panel`;
 
@@ -282,17 +308,21 @@ export function Ribbon({
           role="tabpanel"
           aria-labelledby={`${baseId}-tab-${current.id}`}
         >
-          <div className="ribbon-commands" role="toolbar" aria-label={current.label}>
-            {groupCommands(current.commands).map((g, gi) => (
-              <div key={g.name || `group-${gi}`} className="ribbon-group" role="group" aria-label={g.name || undefined}>
-                <div className="ribbon-group-body">
-                  {layoutGroup(g.commands).map((seg, si) => (
-                    <SegmentView key={si} segment={seg} onUsed={used} />
-                  ))}
+          <div ref={commandsRef} className="ribbon-commands" role="toolbar" aria-label={current.label}>
+            {groups.map((g, gi) =>
+              gi >= groups.length - squeeze && g.name ? (
+                <FoldedGroup key={g.name} group={g} onUsed={used} />
+              ) : (
+                <div key={g.name || `group-${gi}`} className="ribbon-group" role="group" aria-label={g.name || undefined}>
+                  <div className="ribbon-group-body">
+                    {layoutGroup(g.commands).map((seg, si) => (
+                      <SegmentView key={si} segment={seg} onUsed={used} />
+                    ))}
+                  </div>
+                  {g.name && <div className="ribbon-group-label">{g.name}</div>}
                 </div>
-                {g.name && <div className="ribbon-group-label">{g.name}</div>}
-              </div>
-            ))}
+              ),
+            )}
           </div>
           <button
             className="ribbon-collapse"
@@ -306,6 +336,71 @@ export function Ribbon({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** A group folded into one button (narrow windows); its commands open below it. */
+function FoldedGroup({ group, onUsed }: { group: { name: string; commands: RibbonCommand[] }; onUsed: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+  const ref = useRef<HTMLDivElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Element;
+      if (!ref.current?.contains(t) && !popupRef.current?.contains(t) && !t.closest?.(".ribbon-menu, .xl-popup-list")) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("mousedown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const icon = group.commands.find((c) => c.icon)?.icon;
+  return (
+    <div ref={ref} className="ribbon-group folded" role="group" aria-label={group.name}>
+      <button
+        className={`ribbon-button folded-button${open ? " pressed" : ""}`}
+        aria-label={group.name}
+        aria-expanded={open}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          // The ribbon clips its overflow, so the commands open in a fixed layer below the button.
+          const r = ref.current!.getBoundingClientRect();
+          setPos({ left: Math.max(4, Math.min(r.left, window.innerWidth - 420)), top: r.bottom + 2 });
+          setOpen((o) => !o);
+        }}
+      >
+        {icon && <span className="ribbon-icon">{renderIcon(icon, 32)}</span>}
+        <span className="ribbon-label">{group.name}</span>
+        <Icon name="chevronDown" size={10} className="ribbon-chevron" />
+      </button>
+      {open &&
+        createPortal(
+          // In a portal so the ribbon's clipping can't hide it; the wrapper keeps the ribbon's button styles.
+          <div className="ribbon-commands folded-layer" ref={popupRef}>
+        <div className="ribbon-group folded-popup" style={pos}>
+          <div className="ribbon-group-body">
+            {layoutGroup(group.commands).map((seg, si) => (
+              <SegmentView
+                key={si}
+                segment={seg}
+                onUsed={() => {
+                  setOpen(false);
+                  onUsed();
+                }}
+              />
+            ))}
+          </div>
+          <div className="ribbon-group-label">{group.name}</div>
+        </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

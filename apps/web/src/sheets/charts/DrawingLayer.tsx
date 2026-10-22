@@ -66,7 +66,12 @@ interface Props {
   onShapeText: (id: number, text: string) => void;
   /** Start editing this shape's text (e.g. right after drawing a text box). */
   editText: { id: number; seq: number } | null;
+  /** A chart title typed in place (double-click the title); "" returns to the automatic title. */
+  onChartTitle: (id: number, title: string) => void;
 }
+
+/** Height of the title band at the top of a chart (see renderChart.ts). */
+const TITLE_BAND = 40;
 
 export function DrawingLayer(props: Props) {
   const { doc, sheet, revision, geo, scroll, zoom } = props;
@@ -81,6 +86,15 @@ export function DrawingLayer(props: Props) {
     const d = drawings.find((x) => x.id === props.editText!.id);
     if (d?.kind === "shape") setTextEdit({ id: d.id, text: d.shape.text });
   }, [props.editText?.seq]);
+  // The chart whose title is being typed in place.
+  const [titleEdit, setTitleEdit] = useState<{ id: number; text: string } | null>(null);
+  function finishTitle() {
+    if (!titleEdit) return;
+    const d = drawings.find((x) => x.id === titleEdit.id);
+    if (d?.kind === "chart" && titleEdit.text !== (d.chart.title ?? "")) props.onChartTitle(titleEdit.id, titleEdit.text);
+    setTitleEdit(null);
+  }
+
   function finishText() {
     if (!textEdit) return;
     const d = drawings.find((x) => x.id === textEdit.id);
@@ -213,7 +227,16 @@ export function DrawingLayer(props: Props) {
               props.onContextMenu(d.id, e.clientX, e.clientY);
             }}
             onKeyDown={(e) => textEdit?.id !== d.id && onKeyDown(e, d)}
-            onDoubleClick={() => d.kind === "shape" && !isLineShape(d.shape.preset) && setTextEdit({ id: d.id, text: d.shape.text })}
+            onDoubleClick={(e) => {
+              if (d.kind === "shape" && !isLineShape(d.shape.preset)) setTextEdit({ id: d.id, text: d.shape.text });
+              else if (d.kind === "chart" && d.chart.showTitle) {
+                // Double-clicking the title edits it in place, like Excel.
+                const top = (e.currentTarget as HTMLElement).getBoundingClientRect().top;
+                if ((e.clientY - top) / zoom > TITLE_BAND) return;
+                const view = doc.chartViewJson(sheet, d.id, 100, 100);
+                setTitleEdit({ id: d.id, text: (view && (JSON.parse(view) as ChartView).title) || "" });
+              }
+            }}
           >
             {d.kind === "chart" ? (
               <ChartCanvas doc={doc} sheet={sheet} id={d.id} revision={revision} width={rect.w} height={rect.h} zoom={zoom} />
@@ -221,6 +244,28 @@ export function DrawingLayer(props: Props) {
               <ShapeCanvas shape={textEdit?.id === d.id ? { ...d.shape, text: "" } : d.shape} width={rect.w} height={rect.h} zoom={zoom} pad={pad / zoom} />
             ) : (
               <Picture doc={doc} sheet={sheet} id={d.id} mime={d.mime} name={d.name} />
+            )}
+            {titleEdit?.id === d.id && (
+              <input
+                className="chart-title-editor"
+                autoFocus
+                aria-label="Chart title"
+                value={titleEdit.text}
+                style={{ fontSize: 18.5 * zoom, top: 8 * zoom, height: 30 * zoom }}
+                onFocus={(e) => e.currentTarget.select()}
+                onChange={(e) => setTitleEdit({ id: d.id, text: e.target.value })}
+                onMouseDown={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter" || e.key === "Escape") {
+                    e.preventDefault();
+                    if (e.key === "Escape") setTitleEdit(null);
+                    else finishTitle();
+                    layerRef.current?.querySelector<HTMLElement>(`[data-drawing="${d.id}"]`)?.focus();
+                  }
+                }}
+                onBlur={finishTitle}
+              />
             )}
             {textEdit?.id === d.id && d.kind === "shape" && (
               <textarea

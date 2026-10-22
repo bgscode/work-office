@@ -172,3 +172,30 @@ test("an engine crash shows the recovery screen", async ({ page }) => {
   await expect(page.getByRole("alertdialog")).toContainText("Something went wrong");
   await expect(page.getByRole("button", { name: "Reload" })).toBeVisible();
 });
+
+test("chart title in place, pie colours and a narrow ribbon", async ({ page }) => {
+  const { errors, cell } = await openWorkbook(page);
+  await clickCell(page, await cell(0, 0));
+  await typeRows(page, TABLE.map((r) => r.slice(0, 2)));
+  await clickCell(page, await cell(1, 1));
+  await ribbonTab(page, "Insert");
+  await ribbonCommand(page, "Pie");
+  const chart = page.locator(".drawing").first();
+  const box = (await chart.boundingBox())!;
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + 20);
+  await page.getByLabel("Chart title").fill("Sales by month");
+  await page.keyboard.press("Enter");
+  await ribbonCommand(page, "Change Colors");
+  await menuItem(page, "Monochromatic Green");
+  await page.keyboard.press("Control+z");
+  await page.keyboard.press("Control+y");
+
+  // Narrow window: groups fold into buttons that open their commands.
+  await page.setViewportSize({ width: 1024, height: 700 });
+  await ribbonTab(page, "Home");
+  const alignment = page.locator(".ribbon-group.folded", { hasText: "Alignment" });
+  await expect(alignment).toBeVisible();
+  await alignment.getByRole("button", { name: "Alignment" }).click();
+  await expect(page.locator(".folded-popup").getByRole("button", { name: "Wrap Text" })).toBeVisible();
+  await expectNoErrors(errors);
+});

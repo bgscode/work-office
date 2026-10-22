@@ -13,6 +13,9 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Added
 
+- Charts: double-click a chart title to edit it in place; Change Colors now recolours pie and doughnut slices (slice colours are saved in .xlsx).
+- Ribbon: on narrow windows groups fold into one button each, from the right, like Excel; the button opens the group's commands.
+
 - Quality (M7): browser tests for the main flows (typing and formulas, formatting and undo, filter and validation, charts and shapes, freeze panes, print, reload, damaged files, crash recovery) run in CI with Playwright; damaged, truncated or unsupported files (.xls, password-protected) give a clear message instead of failing, covered by fuzz-style tests; a recovery screen replaces a blank page if the app or the WebAssembly engine crashes.
 
 - Shapes: Insert → Shapes with Excel's gallery (lines and arrows, rectangles, basic shapes, block arrows, stars, callouts, flowchart) and Insert → Text Box. Drag on the sheet to draw (Shift keeps it square, a click inserts the default size); type to add text. Shape Format tab: Edit Shape, fill, outline colour and weight, arrowheads, font size, bold/italic, alignment, text colour, arrange. Shapes move, resize, undo, print, and are read from and saved to .xlsx (including Excel's theme-styled shapes).

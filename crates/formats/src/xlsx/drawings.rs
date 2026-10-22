@@ -1094,6 +1094,8 @@ pub(super) fn parse_chart(xml: &str, own_sheet: &str) -> Option<Chart> {
         no_marker: bool,
         no_line: bool,
         labels: bool,
+        /// Pie slices: (category index, colour) from `<c:dPt>`.
+        points: Vec<(usize, String)>,
     }
     let mut stack: Vec<String> = Vec::new();
     let mut group: Option<String> = None;
@@ -1153,6 +1155,18 @@ pub(super) fn parse_chart(xml: &str, own_sheet: &str) -> Option<Chart> {
                         }
                     } else if stack.iter().any(|s| s.ends_with("Chart")) {
                         group_labels = true;
+                    }
+                }
+                "idx" if in_ser && parent == "dPt" => {
+                    if let (Some(s), Ok(i)) = (series.last_mut(), val.parse::<usize>()) {
+                        s.points.push((i, String::new()));
+                    }
+                }
+                "srgbClr" if in_ser && has(&stack, &["dPt", "spPr", "solidFill"]) => {
+                    if let Some((_, c)) = series.last_mut().and_then(|s| s.points.last_mut()) {
+                        if c.is_empty() {
+                            *c = format!("#{}", val.to_ascii_uppercase());
+                        }
                     }
                 }
                 "srgbClr" if in_ser => {
@@ -1290,6 +1304,17 @@ pub(super) fn parse_chart(xml: &str, own_sheet: &str) -> Option<Chart> {
         return None;
     }
     let mut c = Chart::new(chart_type, out_series);
+    if chart_type.is_round() {
+        // Slice colours; palette colours (always written out) read back as automatic.
+        for (i, color) in series.first().map(|s| s.points.clone()).unwrap_or_default() {
+            if i < 10_000 && !color.is_empty() && !color.eq_ignore_ascii_case(chart::auto_color(i)) {
+                if c.point_colors.len() <= i {
+                    c.point_colors.resize(i + 1, None);
+                }
+                c.point_colors[i] = Some(color);
+            }
+        }
+    }
     c.legend = legend;
     c.data_labels = any_labels;
     c.show_title = title_seen || (!auto_title_deleted && c.series.len() == 1);
@@ -1429,6 +1454,7 @@ mod tests {
             let chart = chart.patched(&ChartPatch::XTitle(Some("Region".into())), s).unwrap();
             let chart = chart.patched(&ChartPatch::YTitle(Some("Amount".into())), s).unwrap();
             let chart = chart.patched(&ChartPatch::SeriesColor(0, Some("#112233".into())), s).unwrap();
+            let chart = chart.patched(&ChartPatch::PointColor(1, Some("#445566".into())), s).unwrap();
             d.get_mut(id).unwrap().content = DrawingContent::Chart(Box::new(chart.clone()));
             book.sheets[0].sheet.set_drawings(d);
 
@@ -1458,6 +1484,9 @@ mod tests {
                 assert_eq!(got.y_title.as_deref(), Some("Amount"), "{t:?}");
             }
             assert_eq!(got.source, chart.source, "{t:?}");
+            if t.is_round() {
+                assert_eq!(got.point_colors, vec![None, Some("#445566".to_string())], "{t:?}");
+            }
         }
     }
 

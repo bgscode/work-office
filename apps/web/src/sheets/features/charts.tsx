@@ -94,13 +94,13 @@ export function chartDesignTab(ctx: ChartContext): RibbonTab | null {
         icon: "chartColors",
         size: "large",
         group: "Chart Styles",
-        disabled: round,
         menu: COLOR_SETS.map((set) => ({
           id: `colors-${set.id}`,
           label: set.label,
           onRun: () => {
-            const n = round ? 0 : c.series.length;
-            for (let i = 0; i < Math.max(n, 1); i++) ctx.format("seriesColor", `${i}:${set.colors ? set.colors[i % set.colors.length] : ""}`);
+            // Pie and doughnut colour each slice; other charts each series.
+            if (round) ctx.format("pointColors", set.colors ? set.colors.join(",") : "");
+            else for (let i = 0; i < c.series.length; i++) ctx.format("seriesColor", `${i}:${set.colors ? set.colors[i % set.colors.length] : ""}`);
           },
         })),
       },

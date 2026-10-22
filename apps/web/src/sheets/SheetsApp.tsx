@@ -1679,6 +1679,13 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
             if (doc.formatShape(sheet, id, "text", text)) changed();
           }}
           editShapeText={editShapeText}
+          onChartTitle={(id, title) => {
+            try {
+              if (doc.formatChart(sheet, id, "title", title)) changed();
+            } catch {
+              // ignore: an invalid title is simply not applied
+            }
+          }}
           onEnterAfterTabs={() => {
             const start = tabStart.current;
             tabStart.current = null;

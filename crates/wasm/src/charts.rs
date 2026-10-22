@@ -339,7 +339,9 @@ impl SheetsDocument {
     /// One chart formatting change. `key`/`value`: type: a chart type id;
     /// showTitle|dataLabels: "1"/"0"; title: text ("" = automatic);
     /// xTitle|yTitle: text ("" hides the axis title); legend: none|right|bottom|top|left;
-    /// seriesColor: "index:#RRGGBB" ("index:" = automatic); source: a range like
+    /// seriesColor: "index:#RRGGBB" ("index:" = automatic); pointColor: the same for a
+    /// pie slice; pointColors: "#RRGGBB,#RRGGBB,..." for every slice in turn ("" =
+    /// automatic); source: a range like
     /// "A1:C5"; switch: "" (swap rows/columns). Returns false if nothing changed
     /// (for example a data range with no numbers).
     #[wasm_bindgen(js_name = formatChart)]
@@ -357,6 +359,13 @@ impl SheetsDocument {
             "seriesColor" => {
                 let (i, color) = value.split_once(':').ok_or_else(bad)?;
                 ChartPatch::SeriesColor(i.parse().map_err(|_| bad())?, text(color))
+            }
+            "pointColor" => {
+                let (i, color) = value.split_once(':').ok_or_else(bad)?;
+                ChartPatch::PointColor(i.parse().map_err(|_| bad())?, text(color))
+            }
+            "pointColors" => {
+                ChartPatch::PointColors(value.split(',').filter(|c| !c.is_empty()).map(String::from).collect())
             }
             "source" => ChartPatch::Source(DataRef::parse(value).ok_or_else(bad)?),
             "switch" => ChartPatch::SwitchRowCol,

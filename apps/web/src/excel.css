@@ -2135,3 +2135,54 @@ textarea.cell-editor {
   font-size: 11px;
   white-space: pre-wrap;
 }
+
+.chart-title-editor {
+  position: absolute;
+  left: 10%;
+  width: 80%;
+  box-sizing: border-box;
+  padding: 0 4px;
+  border: 1px solid #8a8886;
+  outline: none;
+  background: #fff;
+  color: #595959;
+  font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif;
+  text-align: center;
+}
+
+/* Ribbon groups folded into one button on narrow windows */
+.ribbon-group.folded {
+  position: relative;
+}
+
+.ribbon-commands .folded-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  height: 100%;
+  min-width: 56px;
+  padding: 4px 6px;
+}
+
+.ribbon-group.folded-popup {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 6px 0;
+  background: #fff;
+  border: 1px solid var(--xl-border-strong);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+
+.ribbon-commands.folded-layer {
+  position: fixed;
+  inset: 0 auto auto 0;
+  z-index: 45;
+  padding: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+}

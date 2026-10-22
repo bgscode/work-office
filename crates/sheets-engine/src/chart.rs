@@ -363,6 +363,8 @@ pub struct Chart {
     pub y_title: Option<String>,
     pub legend: LegendPos,
     pub data_labels: bool,
+    /// Pie and doughnut slice colours by category (`None`: the palette's).
+    pub point_colors: Vec<Option<String>>,
 }
 
 impl Chart {
@@ -382,6 +384,7 @@ impl Chart {
             y_title: None,
             legend,
             data_labels: false,
+            point_colors: Vec::new(),
         }
     }
 
@@ -711,6 +714,10 @@ pub enum ChartPatch {
     DataLabels(bool),
     /// Series index and colour (`None`: automatic).
     SeriesColor(usize, Option<String>),
+    /// Pie/doughnut slice (category index) and colour (`None`: automatic).
+    PointColor(usize, Option<String>),
+    /// Colour every slice from this list in turn (empty: all automatic).
+    PointColors(Vec<String>),
     /// Rebuild the series from a new block of cells ("Select Data").
     Source(DataRef),
     /// Swap whether series come from rows or columns.
@@ -751,6 +758,26 @@ impl Chart {
             ChartPatch::Legend(p) => c.legend = *p,
             ChartPatch::DataLabels(on) => c.data_labels = *on,
             ChartPatch::SeriesColor(i, color) => c.series.get_mut(*i)?.color = color.clone(),
+            ChartPatch::PointColor(i, color) => {
+                if *i >= 10_000 {
+                    return None;
+                }
+                if c.point_colors.len() <= *i {
+                    c.point_colors.resize(*i + 1, None);
+                }
+                c.point_colors[*i] = color.clone();
+                while c.point_colors.last().is_some_and(Option::is_none) {
+                    c.point_colors.pop();
+                }
+            }
+            ChartPatch::PointColors(list) => {
+                let points = c.series.first().map_or(0, |s| s.values.range.cells().take(10_000).count());
+                c.point_colors = if list.is_empty() {
+                    Vec::new()
+                } else {
+                    (0..points).map(|i| Some(list[i % list.len()].clone())).collect()
+                };
+            }
             ChartPatch::Source(src) => {
                 if src.sheet.is_some() {
                     return None;
@@ -946,8 +973,13 @@ pub fn compute_view(chart: &Chart, sheets: &dyn SheetLookup, value_axis_px: f64,
     }
     categories.resize(points.max(categories.len()), String::new());
 
-    let point_colors =
-        if t.is_round() { (0..categories.len()).map(|i| auto_color(i).to_string()).collect() } else { Vec::new() };
+    let point_colors = if t.is_round() {
+        (0..categories.len())
+            .map(|i| chart.point_colors.get(i).cloned().flatten().unwrap_or_else(|| auto_color(i).to_string()))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let value_axis = (!t.is_round()).then(|| {
         let (lo, hi) = value_extent(t, &series);
         if t.grouping() == Grouping::Percent {
@@ -1318,6 +1350,14 @@ mod tests {
     fn patches_and_switch_row_col() {
         let s = table();
         let chart = chart_for_range(&s, rng("A1:C4"), ChartType::ColumnClustered).unwrap();
+        let pie = chart.patched(&ChartPatch::Type(ChartType::Pie), &s).unwrap();
+        let pie = pie.patched(&ChartPatch::PointColor(1, Some("#00FF00".into())), &s).unwrap();
+        let v = compute_view(&pie, &One(&s), 200.0, 400.0);
+        assert_eq!(v.point_colors[1], "#00FF00");
+        assert_eq!(v.point_colors[0], auto_color(0));
+        let mono = pie.patched(&ChartPatch::PointColors(vec!["#111111".into(), "#222222".into()]), &s).unwrap();
+        assert_eq!(compute_view(&mono, &One(&s), 200.0, 400.0).point_colors[2], "#111111");
+        assert!(mono.patched(&ChartPatch::PointColors(Vec::new()), &s).unwrap().point_colors.is_empty());
         let c = chart.patched(&ChartPatch::SeriesColor(1, Some("#FF0000".into())), &s).unwrap();
         assert_eq!(c.series[1].color.as_deref(), Some("#FF0000"));
         let switched = c.patched(&ChartPatch::SwitchRowCol, &s).unwrap();
