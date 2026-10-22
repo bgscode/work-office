@@ -12,6 +12,7 @@ import type { ChartView, DrawingInfo } from "../charts/types";
 import { MAX_COLS, MAX_ROWS, type Rect } from "../geometry";
 import { buildGeometry } from "../sheetGeometry";
 import { readPageSetup } from "./pageSetup";
+import { readTabs } from "../features/sheetTabs";
 import { colSpan, rowSpan, type PrintImage, type PrintJob, type PrintStyle, type SheetSource } from "./printHtml";
 
 export type PrintWhat = "active" | "workbook" | "selection";
@@ -160,7 +161,10 @@ function sheetSource(doc: SheetsDocument, sheet: number, selection: Rect | null)
 /** The print job for `what` on the active sheet, the whole workbook, or the selection. */
 export function buildPrintJob(doc: SheetsDocument, activeSheet: number, what: PrintWhat, selection: Rect, title: string): PrintJob {
   const sheets =
-    what === "workbook" ? doc.sheetNames().map((_, i) => sheetSource(doc, i, null)) : [sheetSource(doc, activeSheet, what === "selection" ? selection : null)];
+    what === "workbook"
+      ? // Hidden sheets don't print, as in Excel.
+        readTabs(doc).flatMap((tab, i) => (tab.hidden ? [] : [sheetSource(doc, i, null)]))
+      : [sheetSource(doc, activeSheet, what === "selection" ? selection : null)];
   const ctx = document.createElement("canvas").getContext("2d")!;
   return {
     title,

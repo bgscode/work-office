@@ -23,7 +23,8 @@ Opening the app shows a start page like Microsoft 365's: create a blank workbook
 - Fill handle: drag to continue series (1, 2, 3 → 4, 5; Item 1 → Item 2; Mon → Tue; Jan → Feb) and copy formulas with shifted references
 - Formatting: bold, italic, underline, strikethrough, text and fill colours, alignment, number formats (₹ with Indian grouping, $, %, dates, times)
 - Typing `18%`, `₹1,500` or `15-08-2025` sets the matching format automatically
-- Insert/delete rows and columns (formulas are rewritten), sort, find & replace, Go To, zoom, right-click menu
+- Insert/delete rows and columns (formulas are rewritten), sort, find & replace, Go To, zoom, right-click menu, AutoSum
+- Sheet tabs: drag to reorder (Ctrl+drag copies), Move or Copy, tab colours, hide and unhide, Ctrl+PgUp/PgDn
 - Paste Special: values only, formatting only, formulas only, transpose
 - Cell layout: borders, fonts, wrap text, merge & center, row heights, hide/unhide, freeze panes
 - Data tools: filter dropdowns, custom sort, remove duplicates, data validation (dropdown lists, limits, alerts), conditional formatting (highlight rules, data bars, colour scales)
@@ -44,6 +45,7 @@ Opening the app shows a start page like Microsoft 365's: create a blank workbook
 | Ctrl + G or F5, or type in the Name Box | Go to a cell or range |
 | Shift + Space / Ctrl + Space | Select row / column |
 | Alt + = | AutoSum |
+| Ctrl + PgUp / PgDn | Previous / next sheet |
 | Shift + arrows | Extend selection |
 | Type anything | Replace cell content |
 | F2 or double-click | Edit cell content |

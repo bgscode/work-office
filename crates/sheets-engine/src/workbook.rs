@@ -25,11 +25,15 @@ pub struct Worksheet {
     pub sheet: Sheet,
     /// How the sheet prints (Page Layout settings).
     pub page_setup: PageSetup,
+    /// Tab colour, `#RRGGBB`.
+    pub tab_color: Option<String>,
+    /// Hidden sheets keep working in formulas but have no tab (Format → Hide Sheet).
+    pub hidden: bool,
 }
 
 impl Worksheet {
     pub fn new(name: String, sheet: Sheet) -> Self {
-        Worksheet { name, sheet, page_setup: PageSetup::default() }
+        Worksheet { name, sheet, page_setup: PageSetup::default(), tab_color: None, hidden: false }
     }
 }
 
@@ -60,11 +64,30 @@ impl Workbook {
 
     /// Append a sheet named "SheetN" (first free N) and return its index.
     pub fn add_sheet(&mut self) -> usize {
-        let name = (1..)
-            .map(|n| format!("Sheet{n}"))
-            .find(|name| !self.sheets.iter().any(|s| s.name.eq_ignore_ascii_case(name)))
-            .unwrap();
+        let name = self.new_sheet_name();
         self.push_sheet(name, Sheet::new())
+    }
+
+    /// The first free `SheetN`.
+    pub fn new_sheet_name(&self) -> String {
+        (1..).map(|n| format!("Sheet{n}")).find(|name| self.sheet_index(name).is_none()).unwrap()
+    }
+
+    /// The name Excel gives a copy of `name`: `Sales (2)`, `Sales (3)`…
+    /// (Sheet names are at most 31 characters, so long names are shortened.)
+    pub fn copy_sheet_name(&self, name: &str) -> String {
+        let base = match name.rsplit_once(" (") {
+            Some((base, n)) if n.strip_suffix(')').is_some_and(|n| n.parse::<u32>().is_ok()) => base,
+            _ => name,
+        };
+        (2..)
+            .map(|n| {
+                let suffix = format!(" ({n})");
+                let keep: String = base.chars().take(31 - suffix.len()).collect();
+                keep + &suffix
+            })
+            .find(|name| self.sheet_index(name).is_none())
+            .unwrap()
     }
 
     pub fn push_sheet(&mut self, name: String, sheet: Sheet) -> usize {

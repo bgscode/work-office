@@ -341,3 +341,46 @@ test("AutoSum: Alt+= under a column, and totals for a selection", async ({ page 
   await expect(formulaBar(page)).toHaveValue("=AVERAGE(B2:B5)");
   await expectNoErrors(errors);
 });
+
+test("sheet tabs: drag to reorder, copy, colour, hide and unhide", async ({ page }) => {
+  const { errors } = await openWorkbook(page);
+  const addSheet = page.getByRole("button", { name: "Add sheet" });
+  await addSheet.click();
+  await addSheet.click();
+  const tabs = page.locator(".sheet-tabs [role=tab]");
+  await expect(tabs).toHaveText(["Sheet1", "Sheet2", "Sheet3"]);
+  // Drag Sheet3 onto the left half of Sheet1.
+  const first = await tabs.nth(0).boundingBox();
+  const third = await tabs.nth(2).boundingBox();
+  await page.mouse.move(third!.x + 10, third!.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(first!.x + 30, first!.y + 8, { steps: 5 });
+  await page.mouse.move(first!.x + 4, first!.y + 8, { steps: 5 });
+  await page.mouse.up();
+  await expect(tabs).toHaveText(["Sheet3", "Sheet1", "Sheet2"]);
+  await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
+  // Move or Copy… with Create a copy.
+  await tabs.nth(1).click({ button: "right" });
+  await page.getByText("Move or Copy…").click();
+  await page.getByRole("option", { name: "(move to end)" }).click();
+  await page.getByLabel("Create a copy").check();
+  await page.locator(".dialog-footer").getByRole("button", { name: "OK" }).click();
+  await expect(tabs).toHaveText(["Sheet3", "Sheet1", "Sheet2", "Sheet1 (2)"]);
+  // Tab colour.
+  await tabs.nth(0).click({ button: "right" });
+  await page.getByText("Tab Color…").click();
+  await page.getByRole("option", { name: "#FF0000" }).click();
+  await expect(tabs.nth(0)).toHaveClass(/colored/);
+  // Hide Sheet2, then bring it back.
+  await tabs.nth(2).click({ button: "right" });
+  await page.locator(".context-menu").getByText("Hide", { exact: true }).click();
+  await expect(tabs).toHaveText(["Sheet3", "Sheet1", "Sheet1 (2)"]);
+  // The copy is active; Ctrl+PgUp skips the hidden sheet.
+  await page.keyboard.press("Control+PageUp");
+  await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
+  await tabs.nth(0).click({ button: "right" });
+  await page.getByText("Unhide…").click();
+  await page.locator(".dialog-footer").getByRole("button", { name: "OK" }).click();
+  await expect(tabs).toHaveText(["Sheet3", "Sheet1", "Sheet2", "Sheet1 (2)"]);
+  await expectNoErrors(errors);
+});

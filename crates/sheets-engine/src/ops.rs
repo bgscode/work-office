@@ -215,6 +215,68 @@ impl Op<Workbook> for RenameSheet {
     }
 }
 
+/// Move the sheet at `from` so it ends up at `to` (dragging a tab).
+/// Formulas refer to sheets by name, so only sheet-scoped names need updating.
+#[derive(Debug, Clone)]
+pub struct MoveSheet {
+    pub from: usize,
+    pub to: usize,
+}
+
+impl Op<Workbook> for MoveSheet {
+    fn apply(&self, doc: &mut Workbook) {
+        let n = doc.sheets.len();
+        if self.from >= n || self.to >= n || self.from == self.to {
+            return;
+        }
+        let ws = doc.sheets.remove(self.from);
+        doc.sheets.insert(self.to, ws);
+        let moved = |i: usize| {
+            if i == self.from {
+                self.to
+            } else if self.from < i && i <= self.to {
+                i - 1
+            } else if self.to <= i && i < self.from {
+                i + 1
+            } else {
+                i
+            }
+        };
+        for d in &mut doc.names {
+            if let Some(s) = d.scope.as_mut() {
+                *s = moved(*s);
+            }
+        }
+        doc.recalc_links();
+    }
+
+    fn invert(&self, _doc: &Workbook) -> Box<dyn Op<Workbook>> {
+        Box::new(MoveSheet { from: self.to, to: self.from })
+    }
+}
+
+/// Tab colour and hidden state of a sheet.
+#[derive(Debug, Clone)]
+pub struct SetSheetTab {
+    pub index: usize,
+    pub tab_color: Option<String>,
+    pub hidden: bool,
+}
+
+impl Op<Workbook> for SetSheetTab {
+    fn apply(&self, doc: &mut Workbook) {
+        if let Some(ws) = doc.sheets.get_mut(self.index) {
+            ws.tab_color = self.tab_color.clone();
+            ws.hidden = self.hidden;
+        }
+    }
+
+    fn invert(&self, doc: &Workbook) -> Box<dyn Op<Workbook>> {
+        let ws = &doc.sheets[self.index];
+        Box::new(SetSheetTab { index: self.index, tab_color: ws.tab_color.clone(), hidden: ws.hidden })
+    }
+}
+
 /// Several ops as one undo step. Each op's inverse is computed against the
 /// state before the batch, so the ops must touch different things (for
 /// example cell inputs and cell styles).
@@ -345,5 +407,47 @@ mod tests {
         history.undo(&mut wb);
         assert_eq!(wb.sheets[1].name, "New");
         assert_eq!(wb.sheets[0].sheet.input(a1), "x");
+    }
+
+    #[test]
+    fn moving_sheets_keeps_formulas_and_sheet_names() {
+        use crate::names::{DefinedName, SetNames};
+        let mut wb = Workbook::new();
+        wb.add_sheet();
+        wb.add_sheet();
+        let a1 = CellRef::new(0, 0);
+        wb.set_inputs(2, [(a1, "5".into())]);
+        wb.set_inputs(0, [(a1, "=Sheet3!A1*2".into())]);
+        SetNames { names: vec![DefinedName::new("Local", "1", Some(2))] }.apply(&mut wb);
+        let mut history = History::default();
+        history.apply(&mut wb, Box::new(MoveSheet { from: 2, to: 0 }));
+        let names: Vec<&str> = wb.sheets.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["Sheet3", "Sheet1", "Sheet2"]);
+        assert_eq!(wb.names[0].scope, Some(0));
+        wb.set_inputs(0, [(a1, "6".into())]);
+        assert_eq!(wb.sheets[1].sheet.value(a1), &Value::Number(12.0));
+        history.undo(&mut wb);
+        assert_eq!(wb.sheets[2].name, "Sheet3");
+        assert_eq!(wb.names[0].scope, Some(2));
+    }
+
+    #[test]
+    fn tab_colour_and_hidden_undo() {
+        let mut wb = Workbook::new();
+        let mut history = History::default();
+        history.apply(&mut wb, Box::new(SetSheetTab { index: 0, tab_color: Some("#FF0000".into()), hidden: true }));
+        assert!(wb.sheets[0].hidden);
+        history.undo(&mut wb);
+        assert_eq!((wb.sheets[0].tab_color.clone(), wb.sheets[0].hidden), (None, false));
+    }
+
+    #[test]
+    fn copy_names_like_excel() {
+        let mut wb = Workbook::new();
+        assert_eq!(wb.copy_sheet_name("Sheet1"), "Sheet1 (2)");
+        wb.push_sheet("Sheet1 (2)".into(), Sheet::new());
+        assert_eq!(wb.copy_sheet_name("Sheet1"), "Sheet1 (3)");
+        assert_eq!(wb.copy_sheet_name("Sheet1 (2)"), "Sheet1 (3)");
+        assert_eq!(wb.copy_sheet_name(&"x".repeat(31)).chars().count(), 31);
     }
 }

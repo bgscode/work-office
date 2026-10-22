@@ -197,22 +197,29 @@ pub(super) fn insert_into_worksheet(xml: String, p: &PageSetup) -> String {
 }
 
 /// `<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>`, merged into an existing `<sheetPr>`.
-fn insert_fit_to_page(mut xml: String) -> String {
-    const PR: &str = r#"<pageSetUpPr fitToPage="1"/>"#;
+fn insert_fit_to_page(xml: String) -> String {
+    insert_sheet_pr(xml, r#"<pageSetUpPr fitToPage="1"/>"#, false)
+}
+
+/// Add `child` to the worksheet's `<sheetPr>` (creating it), as its first or last child
+/// (the schema orders them: tabColor, outlinePr, pageSetUpPr).
+pub(super) fn insert_sheet_pr(mut xml: String, child: &str, first: bool) -> String {
     if let Some(start) = xml.find("<sheetPr") {
         let end = start + xml[start..].find('>').unwrap_or(0);
         if xml[..end].ends_with('/') {
-            // <sheetPr .../> -> <sheetPr ...><pageSetUpPr/></sheetPr>
-            xml.replace_range(end - 1..=end, &format!(">{PR}</sheetPr>"));
+            // <sheetPr .../> -> <sheetPr ...>child</sheetPr>
+            xml.replace_range(end - 1..=end, &format!(">{child}</sheetPr>"));
+        } else if first {
+            xml.insert_str(end + 1, child);
         } else if let Some(close) = xml.find("</sheetPr>") {
-            xml.insert_str(close, PR);
+            xml.insert_str(close, child);
         }
         return xml;
     }
     // First child of <worksheet ...>.
     if let Some(open) = xml.find("<worksheet") {
         if let Some(gt) = xml[open..].find('>') {
-            xml.insert_str(open + gt + 1, &format!("<sheetPr>{PR}</sheetPr>"));
+            xml.insert_str(open + gt + 1, &format!("<sheetPr>{child}</sheetPr>"));
         }
     }
     xml

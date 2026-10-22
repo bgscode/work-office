@@ -40,7 +40,7 @@ interface Props {
   onClose: () => void;
 }
 
-const FILL_COLORS = [
+export const FILL_COLORS = [
   "#FFFFFF", "#F2F2F2", "#D9D9D9", "#BFBFBF", "#808080", "#000000",
   "#FFF2CC", "#FFE699", "#FFC000", "#F8CBAD", "#F4B183", "#ED7D31",
   "#E2EFDA", "#C6E0B4", "#70AD47", "#DDEBF7", "#BDD7EE", "#4472C4",

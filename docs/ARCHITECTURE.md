@@ -112,7 +112,8 @@ inserts rewrite `refers_to` with the same `refs.rs` helpers formulas use.
 | Insert, move, resize, format or delete a chart or picture | `SetDrawings` (`chart.rs`) | previous drawings |
 | Page setup (Page Layout tab, Page Setup dialog) | `SetPageSetup` (`page_setup.rs`) | previous settings |
 | Remove duplicates, custom sort, sort from a filter | `ReplaceSheet` | the old sheet |
-| Add/rename/delete sheet | `InsertSheet`, `RenameSheet`, `RemoveSheet` | the inverse op |
+| Add/rename/delete/move sheet | `InsertSheet`, `RenameSheet`, `RemoveSheet`, `MoveSheet` | the inverse op |
+| Tab colour, hide/unhide sheet | `SetSheetTab` | the previous colour and state |
 
 ## Design rules
 

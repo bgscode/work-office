@@ -47,6 +47,7 @@ const READ_ONLY = new Set([
   "rowLayout",
   "rowsToMeasure",
   "sheetNames",
+  "sheetTabs",
   "spillRange",
   "styleBlock",
   "toCsv",

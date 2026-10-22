@@ -127,6 +127,8 @@ fn build() -> Workbook {
     p.set("titleRows", "1").unwrap();
     p.set("gridlines", "1").unwrap();
     p.set("footer", "&CPage &P of &N").unwrap();
+    book.sheets[0].tab_color = Some("#C00000".into());
+    book.sheets[1].hidden = true;
     book
 }
 
@@ -173,4 +175,8 @@ fn everything_round_trips() {
 
     // Page setup.
     assert_eq!(a.page_setup, b.page_setup);
+
+    // Sheet tabs.
+    assert_eq!(b.tab_color.as_deref(), Some("#C00000"));
+    assert!(back.sheets[1].hidden && !b.hidden);
 }

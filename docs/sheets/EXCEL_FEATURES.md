@@ -135,8 +135,8 @@ When you finish an item, update its row in the same pull request.
 |---|---|---|---|
 | Several sheets; add, rename, delete | ✅ | P1 | – |
 | Autosave in the browser | ✅ | P1 | – |
-| Reorder sheets by dragging tabs | ⬜ | P2 | – |
-| Duplicate sheet, tab colours, hide sheet | ⬜ | P2 | – |
+| Reorder sheets by dragging tabs (Ctrl+drag copies), Move or Copy dialog, Ctrl+PgUp/PgDn | ✅ | P2 | I4 |
+| Duplicate sheet, tab colours, hide/unhide sheet (saved in .xlsx) | ✅ | P2 | I4 |
 | Protect sheet / workbook with password | ⬜ | P3 | – |
 
 ## 8. Files, saving and printing

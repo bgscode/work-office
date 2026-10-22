@@ -65,6 +65,7 @@ import { Grid, fillArea, type FillDirection, type GridShortcut } from "./Grid";
 import { fontFor } from "./paint";
 import { NameBox } from "./NameBox";
 import { SheetTabs } from "./SheetTabs";
+import { MoveCopyDialog, TabColorDialog, UnhideDialog, moveTarget, nextVisible, readTabs } from "./features/sheetTabs";
 import type { EditState } from "./types";
 import { MOD_KEY, autoSumRange, insertFunctionText, statusMode, zoomToFit } from "./chrome";
 import { InsertFunctionDialog } from "./InsertFunctionDialog";
@@ -134,6 +135,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
   const [zoom, setZoomState] = useState(savedZoom);
   const [reveal, setReveal] = useState<{ row: number; col: number; seq: number } | null>(null);
   const [renamingTab, setRenamingTab] = useState<number | null>(null);
+  const [tabDialog, setTabDialog] = useState<{ kind: "color" | "unhide" | "move"; index: number } | null>(null);
   const [assistIndex, setAssistIndex] = useState(0);
   const [assistDismissedAt, setAssistDismissedAt] = useState<number | null>(null);
   const cellInputRef = useRef<HTMLTextAreaElement>(null);
@@ -1259,6 +1261,11 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       // Alt+=: AutoSum.
       e.preventDefault();
       autoSum("SUM");
+    } else if (mod && !e.shiftKey && (e.key === "PageUp" || e.key === "PageDown")) {
+      // Ctrl+PgUp / Ctrl+PgDn: previous / next sheet.
+      e.preventDefault();
+      const next = nextVisible(readTabs(doc), sheet, e.key === "PageUp" ? -1 : 1);
+      if (next !== sheet) switchSheet(next);
     } else if (e.key === "F12") {
       e.preventDefault();
       if (editing) commit(0, 0);
@@ -1362,26 +1369,87 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
     setMenu({ x, y, items });
   }
 
+  // ---- sheet tabs
+
+  const sheetTabs = readTabs(doc);
+
+  // Undo can hide the sheet on screen; show a visible one instead.
+  const activeHidden = sheetTabs[sheet]?.hidden ?? false;
+  useEffect(() => {
+    if (!activeHidden) return;
+    const tabs = readTabs(doc);
+    const next = nextVisible(tabs, sheet, 1);
+    setSheet(next === sheet ? nextVisible(tabs, sheet, -1) : next);
+  }, [activeHidden, doc, sheet]);
+
+  function switchSheet(i: number) {
+    if (editing && pointMode) {
+      // Typing a formula: keep editing (in the formula bar) and point at cells on that sheet.
+      setEditing({ ...editing, source: "bar" });
+      pendingCaret.current = editing.caret;
+    } else if (editing) {
+      commit(0, 0);
+    }
+    setSheet(i);
+    setSelectedDrawing(null);
+    setSelection(single({ row: 0, col: 0 }));
+  }
+
+  function deleteSheet(index: number) {
+    if (!confirm(`Delete "${doc.sheetNames()[index]}"? You can undo this.`)) return;
+    if (doc.deleteSheet(index)) {
+      const tabs = readTabs(doc);
+      const near = Math.max(0, Math.min(sheet, tabs.length - 1));
+      setSheet(tabs[near].hidden ? nextVisible(tabs, near, near > 0 ? -1 : 1) : near);
+      changed();
+    }
+  }
+
+  /** Move (or copy) sheet `from` so it sits before sheet `before` (the count: at the end). */
+  function moveSheet(from: number, before: number, copy: boolean) {
+    if (copy) {
+      setSheet(doc.duplicateSheet(from, before));
+    } else {
+      const to = moveTarget(from, before);
+      if (to === from) return;
+      doc.moveSheet(from, to);
+      // The active sheet stays active wherever it moved.
+      const order = doc.sheetNames().map((_, i) => i);
+      const [moved] = order.splice(from, 1);
+      order.splice(to, 0, moved);
+      setSheet(order.indexOf(sheet));
+    }
+    changed();
+  }
+
+  function hideSheet(index: number) {
+    if (!doc.setSheetTab(index, sheetTabs[index].color ?? "", true)) {
+      alert("A workbook must contain at least one visible worksheet.");
+      return;
+    }
+    if (index === sheet) {
+      const tabs = readTabs(doc);
+      const next = nextVisible(tabs, index, 1);
+      setSheet(next === index ? nextVisible(tabs, index, -1) : next);
+    }
+    changed();
+  }
+
+  function sheetCommands(index: number): MenuItem[] {
+    const anyHidden = sheetTabs.some((t) => t.hidden);
+    return [
+      { label: "Insert Sheet", icon: "insertSheet", onRun: addSheet },
+      { label: "Delete", icon: "trash", disabled: sheetTabs.filter((t) => !t.hidden).length <= 1, onRun: () => deleteSheet(index) },
+      { label: "Rename", icon: "rename", onRun: () => setRenamingTab(index) },
+      { label: "Move or Copy…", onRun: () => setTabDialog({ kind: "move", index }) },
+      { label: "Tab Color…", onRun: () => setTabDialog({ kind: "color", index }), separatorBefore: true },
+      { label: "Hide", onRun: () => hideSheet(index), separatorBefore: true },
+      { label: "Unhide…", disabled: !anyHidden, onRun: () => setTabDialog({ kind: "unhide", index }) },
+    ];
+  }
+
   function tabMenu(index: number, x: number, y: number) {
-    setMenu({
-      x,
-      y,
-      items: [
-        { label: "Rename", onRun: () => setRenamingTab(index), icon: "rename" },
-        {
-          label: "Delete sheet",
-          icon: "trash",
-          disabled: doc.sheetNames().length <= 1,
-          onRun: () => {
-            if (!confirm(`Delete "${doc.sheetNames()[index]}"? You can undo this.`)) return;
-            if (doc.deleteSheet(index)) {
-              setSheet(Math.max(0, Math.min(sheet, doc.sheetNames().length - 1)));
-              changed();
-            }
-          },
-        },
-      ],
-    });
+    setMenu({ x, y, items: sheetCommands(index) });
   }
 
   // ---- ribbon
@@ -1545,6 +1613,10 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
             ...formatMenuItems(layoutCtx),
             { id: "menu-format-cells", label: "Format Cells…", shortcut: `${MOD_KEY}1`, icon: "formatCells", onRun: () => setFormatDialog("number"), separatorBefore: true },
             { id: "menu-rename-sheet", label: "Rename Sheet", icon: "rename", onRun: () => setRenamingTab(sheet), separatorBefore: true },
+            { id: "menu-move-sheet", label: "Move or Copy Sheet…", onRun: () => setTabDialog({ kind: "move", index: sheet }) },
+            { id: "menu-tab-color", label: "Tab Color…", onRun: () => setTabDialog({ kind: "color", index: sheet }) },
+            { id: "menu-hide-sheet", label: "Hide Sheet", onRun: () => hideSheet(sheet), separatorBefore: true },
+            { id: "menu-unhide-sheet", label: "Unhide Sheet…", disabled: !sheetTabs.some((t) => t.hidden), onRun: () => setTabDialog({ kind: "unhide", index: sheet }) },
           ],
         },
         {
@@ -1826,19 +1898,10 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       <footer className="sheets-footer">
         <SheetTabs
           names={doc.sheetNames()}
+          tabs={sheetTabs}
           active={sheet}
-          onSelect={(i) => {
-            if (editing && pointMode) {
-              // Typing a formula: keep editing (in the formula bar) and point at cells on that sheet.
-              setEditing({ ...editing, source: "bar" });
-              pendingCaret.current = editing.caret;
-            } else if (editing) {
-              commit(0, 0);
-            }
-            setSheet(i);
-            setSelectedDrawing(null);
-            setSelection(single({ row: 0, col: 0 }));
-          }}
+          onSelect={switchSheet}
+          onMove={moveSheet}
           onAdd={addSheet}
           onRename={(i, name) => {
             if (name === doc.sheetNames()[i]) return true;
@@ -1879,6 +1942,31 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       )}
       {insertFunctionOpen && <InsertFunctionDialog onInsert={closeInsertFunction} onClose={() => closeInsertFunction(null)} />}
       {renderDataDialog()}
+      {tabDialog?.kind === "color" && (
+        <TabColorDialog
+          current={sheetTabs[tabDialog.index]?.color ?? null}
+          onPick={(color) => {
+            doc.setSheetTab(tabDialog.index, color ?? "", sheetTabs[tabDialog.index].hidden);
+            changed();
+          }}
+          onClose={() => setTabDialog(null)}
+        />
+      )}
+      {tabDialog?.kind === "unhide" && (
+        <UnhideDialog
+          names={doc.sheetNames()}
+          tabs={sheetTabs}
+          onUnhide={(i) => {
+            doc.setSheetTab(i, sheetTabs[i].color ?? "", false);
+            setSheet(i);
+            changed();
+          }}
+          onClose={() => setTabDialog(null)}
+        />
+      )}
+      {tabDialog?.kind === "move" && (
+        <MoveCopyDialog names={doc.sheetNames()} tabs={sheetTabs} index={tabDialog.index} onDone={(before, copy) => moveSheet(tabDialog.index, before, copy)} onClose={() => setTabDialog(null)} />
+      )}
       {nameDialog === "manager" && (
         <NameManagerDialog
           doc={doc}

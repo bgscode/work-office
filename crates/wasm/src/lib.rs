@@ -18,7 +18,8 @@ use sheets_engine::borders::BorderPreset;
 use sheets_engine::fill::FillDirection;
 use sheets_engine::formula::refs::{self, Axis};
 use sheets_engine::ops::{
-    Batch, InsertSheet, RemoveSheet, RenameSheet, ReplaceSheet, SetCells, SetColWidths, SetStyles,
+    Batch, InsertSheet, MoveSheet, RemoveSheet, RenameSheet, ReplaceSheet, Sequence, SetCells, SetColWidths,
+    SetSheetTab, SetStyles,
 };
 use sheets_engine::painter::StyleSnapshot;
 use sheets_engine::{Align, CellRef, FindOptions, NumberFormat, Range, Sheet, Style, StylePatch, Value, Workbook};
@@ -174,11 +175,82 @@ impl SheetsDocument {
     /// Append a new sheet and return its index.
     #[wasm_bindgen(js_name = addSheet)]
     pub fn add_sheet(&mut self) -> usize {
-        let mut probe = self.book.clone();
-        let index = probe.add_sheet();
-        let sheet = probe.sheets.swap_remove(index);
+        let index = self.book.sheets.len();
+        let sheet = sheets_engine::Worksheet::new(self.book.new_sheet_name(), Sheet::new());
         self.apply(InsertSheet { index, sheet });
         index
+    }
+
+    /// Move a sheet (dragging its tab) so it ends up at `to`.
+    #[wasm_bindgen(js_name = moveSheet)]
+    pub fn move_sheet(&mut self, from: usize, to: usize) {
+        let n = self.book.sheets.len();
+        if from < n && to < n && from != to {
+            self.apply(MoveSheet { from, to });
+        }
+    }
+
+    /// Copy a sheet so the copy sits before sheet `before` (`before` = the number
+    /// of sheets: at the end), named like Excel's copies (`Sales (2)`), with its
+    /// own copies of names scoped to it. Returns the copy's index.
+    #[wasm_bindgen(js_name = duplicateSheet)]
+    pub fn duplicate_sheet(&mut self, index: usize, before: usize) -> usize {
+        let mut sheet = self.book.sheets[index].clone();
+        sheet.name = self.book.copy_sheet_name(&sheet.name);
+        sheet.hidden = false;
+        let at = before.min(self.book.sheets.len());
+        let mut names = self.book.names.clone();
+        for d in &mut names {
+            if let Some(s) = d.scope.as_mut().filter(|s| **s >= at) {
+                *s += 1;
+            }
+        }
+        let copies: Vec<_> = names
+            .iter()
+            .filter(|d| d.scope == Some(index))
+            .map(|d| {
+                let mut copy = d.clone();
+                copy.scope = Some(at);
+                copy
+            })
+            .collect();
+        let mut ops: Vec<Box<dyn Op<Workbook>>> = vec![Box::new(InsertSheet { index: at, sheet })];
+        if !copies.is_empty() {
+            names.extend(copies);
+            ops.push(Box::new(sheets_engine::names::SetNames { names }));
+        }
+        self.apply(Sequence(ops));
+        at
+    }
+
+    /// `[{"color":"#RRGGBB"|null,"hidden":bool}, …]`, one per sheet.
+    #[wasm_bindgen(js_name = sheetTabs)]
+    pub fn sheet_tabs(&self) -> String {
+        let tabs: Vec<String> = self
+            .book
+            .sheets
+            .iter()
+            .map(|ws| {
+                let color = ws.tab_color.as_deref().map_or("null".to_string(), json_string);
+                format!(r#"{{"color":{color},"hidden":{}}}"#, ws.hidden)
+            })
+            .collect();
+        format!("[{}]", tabs.join(","))
+    }
+
+    /// Tab colour (`""` for none) and hidden state. Refuses (false) to hide the last visible sheet.
+    #[wasm_bindgen(js_name = setSheetTab)]
+    pub fn set_sheet_tab(&mut self, index: usize, color: &str, hidden: bool) -> bool {
+        let Some(ws) = self.book.sheets.get(index) else { return false };
+        let others_visible = self.book.sheets.iter().enumerate().any(|(i, s)| i != index && !s.hidden);
+        if hidden && !others_visible {
+            return false;
+        }
+        let tab_color = (!color.is_empty()).then(|| color.to_string());
+        if tab_color != ws.tab_color || hidden != ws.hidden {
+            self.apply(SetSheetTab { index, tab_color, hidden });
+        }
+        true
     }
 
     /// Returns false if the name is empty or already used.

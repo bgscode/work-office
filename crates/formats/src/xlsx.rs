@@ -140,8 +140,8 @@ pub fn read(bytes: &[u8]) -> Result<Workbook> {
     drop(styles_xml);
     let shared = SharedStrings::new(shared);
     let mut book = Workbook::empty();
-    let sheet_order: Vec<String> = sheet_list(&workbook_xml).into_iter().map(|(name, _)| name).collect();
-    for (name, rid) in sheet_list(&workbook_xml) {
+    let sheet_order: Vec<String> = sheet_list(&workbook_xml).into_iter().map(|(name, ..)| name).collect();
+    for (name, rid, hidden) in sheet_list(&workbook_xml) {
         let Some(rel) = rels.iter().find(|r| r.id == rid) else { continue };
         let mut timer = Timer::start();
         let xml = part(&mut zip, &resolve(&rel.target))?.unwrap_or_default();
@@ -149,9 +149,11 @@ pub fn read(bytes: &[u8]) -> Result<Workbook> {
         let data = sheet_data(&xml, &shared, &dxfs);
         // Page setup is in <sheetPr> before the cells and after </sheetData>;
         // read those parts only, not the cells again.
-        let page_setup = match (xml.find("<sheetData"), xml.rfind("</sheetData>")) {
-            (Some(a), Some(b)) if a < b => page_setup::read_sheet(&format!("{}{}", &xml[..a], &xml[b..])),
-            _ => page_setup::read_sheet(&xml),
+        let (page_setup, tab) = match (xml.find("<sheetData"), xml.rfind("</sheetData>")) {
+            (Some(a), Some(b)) if a < b => {
+                (page_setup::read_sheet(&format!("{}{}", &xml[..a], &xml[b..])), tab_color(&xml[..a]))
+            }
+            _ => (page_setup::read_sheet(&xml), None),
         };
         drop(xml);
         let parse = timer.lap();
@@ -173,7 +175,16 @@ pub fn read(bytes: &[u8]) -> Result<Workbook> {
         let load = timer.lap();
         Timer::report(|| format!("{name}: unzip {unzip}, parse {parse} ({cells} cells), load+calc {load}"));
         let index = book.push_sheet(name, sheet);
-        book.sheets[index].page_setup = page_setup;
+        let ws = &mut book.sheets[index];
+        ws.page_setup = page_setup;
+        ws.tab_color = tab;
+        ws.hidden = hidden;
+    }
+    // At least one sheet must show.
+    if book.sheets.iter().all(|ws| ws.hidden) {
+        if let Some(ws) = book.sheets.first_mut() {
+            ws.hidden = false;
+        }
     }
     page_setup::apply_defined_names(&workbook_xml, &sheet_order, &mut book);
     if book.sheets.is_empty() {
@@ -216,14 +227,34 @@ fn relationships(xml: &str) -> Vec<Relationship> {
 }
 
 /// (sheet name, relationship id) in workbook order.
-fn sheet_list(xml: &str) -> Vec<(String, String)> {
+/// `(name, relationship id, hidden)` of each `<sheet>` in workbook.xml.
+fn sheet_list(xml: &str) -> Vec<(String, String, bool)> {
     let mut out = Vec::new();
     walk(xml, |ev| {
         if let XmlEvent::Start { name: "sheet", attrs } = ev {
-            out.push((attr(attrs, "name").to_string(), attr(attrs, "id").to_string()));
+            let hidden = matches!(&*attr(attrs, "state"), "hidden" | "veryHidden");
+            out.push((attr(attrs, "name").to_string(), attr(attrs, "id").to_string(), hidden));
         }
     });
     out
+}
+
+/// `<sheetPr><tabColor rgb="FFRRGGBB"/>` (or a theme colour) in a worksheet's head.
+fn tab_color(head: &str) -> Option<String> {
+    let mut color = None;
+    walk(head, |ev| {
+        if let XmlEvent::Start { name: "tabColor", attrs } = ev {
+            color = argb(&attr(attrs, "rgb")).or_else(|| {
+                // The default Office theme; tints are ignored.
+                const THEME: [&str; 10] = [
+                    "#FFFFFF", "#000000", "#E7E6E6", "#44546A", "#4472C4", "#ED7D31", "#A5A5A5", "#FFC000", "#5B9BD5",
+                    "#70AD47",
+                ];
+                attr(attrs, "theme").parse::<usize>().ok().and_then(|i| THEME.get(i)).map(|c| c.to_string())
+            });
+        }
+    });
+    color
 }
 
 fn shared_strings(xml: &str) -> Vec<String> {
@@ -719,19 +750,31 @@ pub fn write(book: &Workbook) -> Result<Vec<u8>> {
         ),
     ));
 
+    // Excel opens on the first tab; it must not be a hidden one.
+    let active = book.sheets.iter().position(|ws| !ws.hidden).unwrap_or(0);
+    let views = if active > 0 {
+        format!(r#"<bookViews><workbookView activeTab="{active}" firstSheet="{active}"/></bookViews>"#)
+    } else {
+        String::new()
+    };
     let mut workbook = format!(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="{NS_MAIN}" xmlns:r="{NS_REL}"><sheets>"#
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="{NS_MAIN}" xmlns:r="{NS_REL}">{views}<sheets>"#
     );
     let mut rels =
         format!(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="{NS_PKG_REL}">"#);
     for (i, ws) in book.sheets.iter().enumerate() {
         let id = i + 1;
-        workbook.push_str(&format!(r#"<sheet name="{}" sheetId="{id}" r:id="rId{id}"/>"#, escape(&ws.name)));
+        let state = if ws.hidden { r#" state="hidden""# } else { "" };
+        workbook.push_str(&format!(r#"<sheet name="{}" sheetId="{id}"{state} r:id="rId{id}"/>"#, escape(&ws.name)));
         rels.push_str(&format!(
             r#"<Relationship Id="rId{id}" Type="{NS_REL}/worksheet" Target="worksheets/sheet{id}.xml"/>"#
         ));
         let sheet_xml = drawing_parts.add_sheet(id, book, i, worksheet_xml(&ws.sheet, &mut styles, &mut strings));
-        let sheet_xml = page_setup::insert_into_worksheet(sheet_xml, &ws.page_setup);
+        let mut sheet_xml = page_setup::insert_into_worksheet(sheet_xml, &ws.page_setup);
+        if let Some(color) = &ws.tab_color {
+            let rgb = format!(r#"<tabColor rgb="FF{}"/>"#, color.trim_start_matches('#').to_ascii_uppercase());
+            sheet_xml = page_setup::insert_sheet_pr(sheet_xml, &rgb, true);
+        }
         parts.push((format!("xl/worksheets/sheet{id}.xml"), sheet_xml));
     }
     // Ask Excel to recalculate on open, since our cached values may differ slightly.

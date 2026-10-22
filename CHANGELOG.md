@@ -14,6 +14,9 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Added
 
+- Sheet tabs like Excel: drag a tab to move the sheet (Ctrl+drag copies it), Move or Copy… (with Create a copy), Tab Color…, Hide and Unhide… from the tab's right-click menu or Home → Format; Ctrl+PgUp/PgDn switch sheets. Copies are named `Sales (2)` and get their own copies of sheet-scoped names. Tab colours and hidden sheets are saved in .xlsx; hidden sheets don't print with the whole workbook.
+- Adding a sheet no longer copies the whole workbook in memory first (faster on big files).
+
 - AutoSum (Home → Editing, Alt+=): Sum, Average, Count Numbers, Max or Min of the numbers above the cell (else to its left), ready to adjust before Enter; with a range selected, a total goes under each column.
 
 - Defined names: type a name in the Name Box to name the selected cells, or use Formulas → Define Name / Name Manager (Ctrl+F3) with workbook or sheet scope and comments. Formulas use names (`=SUM(Sales)*(1+GST)`), autocomplete suggests them, the Name Box goes to them, and they follow renamed or deleted sheets and inserted or deleted rows. Saved in .xlsx. Formulas → Show Formulas (Ctrl+`).

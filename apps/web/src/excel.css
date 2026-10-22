@@ -796,7 +796,43 @@ textarea.cell-editor {
   bottom: 2px;
   height: 2px;
   border-radius: 1px;
-  background: var(--xl-green);
+  background: var(--tab-color, var(--xl-green));
+}
+
+/* A coloured tab is filled when not active; the active one shows the colour as its underline. */
+.sheet-tabs button[role="tab"].colored:not(.active) {
+  background: var(--tab-color);
+  color: var(--tab-text);
+}
+
+.sheet-tabs button[role="tab"].colored.active::after {
+  height: 4px;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  border-radius: 0;
+}
+
+/* Where a dragged tab will land. */
+.sheet-tabs button[role="tab"].drop-before::before,
+.sheet-tabs button[role="tab"].drop-after::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 7px solid var(--xl-text);
+  height: 0;
+}
+
+.sheet-tabs button[role="tab"].drop-before::before {
+  left: -7px;
+}
+
+.sheet-tabs button[role="tab"].drop-after::before {
+  right: -7px;
 }
 
 .sheet-tabs .add-sheet,
@@ -2268,4 +2304,23 @@ textarea.cell-editor {
 
 .formula-input textarea.ghost {
   color: #a19f9d;
+}
+
+/* A single-choice list in a dialog (Unhide, Move or Copy). */
+.dialog-list {
+  height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--xl-border);
+  background: #fff;
+  margin-bottom: 10px;
+}
+
+.dialog-list [role="option"] {
+  padding: 3px 8px;
+  cursor: default;
+  user-select: none;
+}
+
+.dialog-list [role="option"].current {
+  background: #cfe4d6;
 }
