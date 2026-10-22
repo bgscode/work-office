@@ -2186,3 +2186,82 @@ textarea.cell-editor {
   height: 0;
   overflow: visible;
 }
+
+/* ---------------------------------------------------------------- Format Cells */
+
+.format-number {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 14px;
+}
+
+.format-list {
+  max-height: 220px;
+  margin: 0;
+  padding: 2px 0;
+  overflow: auto;
+  list-style: none;
+  border: 1px solid var(--xl-border-strong);
+  font-size: 12px;
+}
+
+.format-number > .format-list {
+  max-height: 300px;
+}
+
+.format-list li {
+  padding: 3px 8px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.format-list li:hover {
+  background: var(--xl-hover);
+}
+
+.format-list li.active {
+  background: #cfe4d6;
+}
+
+.format-number-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.format-sample {
+  margin: 0;
+  padding: 4px 8px 8px;
+  border: 1px solid var(--xl-border-strong);
+  font: 15px Calibri, Carlito, "Segoe UI", Arial, sans-serif;
+  min-height: 24px;
+}
+
+.format-sample legend {
+  font: 12px "Segoe UI", system-ui, sans-serif;
+  color: var(--xl-muted);
+}
+
+.fill-swatches {
+  display: grid;
+  grid-template-columns: repeat(6, 28px);
+  gap: 4px;
+  margin: 10px 0;
+}
+
+.fill-swatches button {
+  width: 28px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid #c8c6c4;
+}
+
+.fill-swatches button.active {
+  outline: 2px solid var(--xl-green);
+  outline-offset: 1px;
+}
+
+.format-cells .dialog-tab-body {
+  min-height: 330px;
+}

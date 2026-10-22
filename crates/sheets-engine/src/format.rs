@@ -2,11 +2,19 @@
 //! to a cell's number format.
 
 use crate::date;
+use crate::numfmt;
 use crate::style::NumberFormat;
 use crate::value::{format_number, Value};
 
 /// Display text for a value under a number format.
 pub fn format_value(v: &Value, nf: &NumberFormat) -> String {
+    if let NumberFormat::Custom(code) = nf {
+        return match v {
+            Value::Number(n) => numfmt::format_number_code(*n, code).text,
+            Value::Text(t) => numfmt::format_text_code(t, code).text,
+            other => other.display(),
+        };
+    }
     let Value::Number(n) = v else { return v.display() };
     let n = *n;
     match nf {
@@ -27,6 +35,17 @@ pub fn format_value(v: &Value, nf: &NumberFormat) -> String {
         NumberFormat::Date => format_date(n),
         NumberFormat::Time => format_time(n),
         NumberFormat::DateTime => format!("{} {}", format_date(n), format_time(n)),
+        NumberFormat::Custom(_) => unreachable!(),
+    }
+}
+
+/// The colour a custom format gives this value (`[Red]` and friends), if any.
+pub fn format_color(v: &Value, nf: &NumberFormat) -> Option<&'static str> {
+    let NumberFormat::Custom(code) = nf else { return None };
+    match v {
+        Value::Number(n) => numfmt::format_number_code(*n, code).color,
+        Value::Text(t) => numfmt::format_text_code(t, code).color,
+        _ => None,
     }
 }
 

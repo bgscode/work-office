@@ -25,6 +25,7 @@ pub mod format;
 pub mod formula;
 pub mod functions;
 pub mod layout;
+pub mod numfmt;
 pub mod ops;
 pub mod page_setup;
 pub mod painter;

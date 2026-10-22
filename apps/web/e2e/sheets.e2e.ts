@@ -218,3 +218,26 @@ test("dragging row and column borders resizes them", async ({ page }) => {
   await clickCell(page, await cell(0, 0));
   await expectNoErrors(errors);
 });
+
+test("Format Cells: custom number formats", async ({ page }) => {
+  const { errors, cell } = await openWorkbook(page);
+  await clickCell(page, await cell(0, 0));
+  await typeRows(page, [["15-08-2025"], ["-1234.5"], ["0.256"]]);
+  // A date as dd-mmm-yyyy through Custom.
+  await clickCell(page, await cell(0, 0));
+  await page.keyboard.press("Control+1");
+  await page.getByRole("listbox", { name: "Category" }).getByText("Custom", { exact: true }).dispatchEvent("mousedown");
+  await page.getByLabel("Format code", { exact: true }).fill("dd-mmm-yyyy");
+  await expect(page.locator(".format-sample")).toContainText("15-Aug-2025");
+  await page.getByRole("button", { name: "OK", exact: true }).click();
+  // A negative number in red with brackets.
+  await clickCell(page, await cell(1, 0));
+  await page.keyboard.press("Control+1");
+  await page.getByRole("listbox", { name: "Category" }).getByText("Number", { exact: true }).dispatchEvent("mousedown");
+  await page.getByRole("listbox", { name: "Negative numbers" }).locator("li").nth(3).dispatchEvent("mousedown");
+  await expect(page.locator(".format-sample")).toContainText("(1234.50)");
+  await page.screenshot({ path: "test-results/format-cells.png" });
+  await page.getByRole("button", { name: "OK", exact: true }).click();
+  await expect(page.locator(".dialog")).toHaveCount(0);
+  await expectNoErrors(errors);
+});

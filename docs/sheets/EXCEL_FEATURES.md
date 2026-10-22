@@ -70,8 +70,8 @@ When you finish an item, update its row in the same pull request.
 | Conditional formatting: colour scales, data bars | ✅ | P2 | M4 |
 | Conditional formatting: icon sets, custom format picker | ⬜ | P2 | – |
 | Format as Table (banded rows, header style) | ⬜ | P2 | – |
-| Custom number format codes (`0.0"kg"`, `[Red]`…) | ⬜ | P2 | – |
-| Accounting, fraction, scientific formats | ⬜ | P2 | – |
+| Custom number format codes (`0.0"kg"`, `[Red]`, conditions, sections, `[h]:mm`, `dd-mmm-yyyy`…) with Format Cells (Ctrl+1) | ✅ | P1 | I1 |
+| Accounting, fraction, scientific formats | ✅ | P2 | I1 |
 | Indent, text rotation | ⬜ | P3 | – |
 | Cell styles and document themes | ⬜ | P3 | – |
 

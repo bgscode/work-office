@@ -72,6 +72,7 @@ import { StatusBar } from "./StatusBar";
 import { WorkbookTitle, type SaveStatus } from "./WorkbookTitle";
 import { Icon } from "@office/ui";
 import { Select } from "./Select";
+import { FormatCellsDialog, type FormatTab } from "./features/FormatCellsDialog";
 import { ChartTitlesDialog, SelectDataDialog, chartDesignTab, insertChartCommands, type ChartContext, type ChartDialog } from "./features/charts";
 import { rectAnchor, type Rect4 } from "./charts/DrawingLayer";
 import { ShapesGallery, insertShapeCommands, shapeFormatTab, type ShapeContext } from "./features/shapes";
@@ -147,6 +148,8 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
   const [savedRevision, setSavedRevision] = useState(0);
   const [saveFailed, setSaveFailed] = useState(false);
   const changed = () => setRevision((r) => r + 1);
+  /** Format Cells (Ctrl+1): the tab it opens on, or null when closed. */
+  const [formatDialog, setFormatDialog] = useState<FormatTab | null>(null);
   // Files and printing: File → Print view, Page Setup dialog, a short "saved" note.
   const [printOpen, setPrintOpen] = useState(false);
   const [pageSetupTab, setPageSetupTab] = useState<PageSetupTab | null>(null);
@@ -1188,6 +1191,11 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       e.preventDefault();
       if (editing) commit(0, 0);
       setPrintOpen(true);
+    } else if (mod && !e.altKey && !e.shiftKey && e.key === "1") {
+      // Ctrl+1: Format Cells.
+      e.preventDefault();
+      if (editing) commit(0, 0);
+      setFormatDialog("number");
     } else if (e.key === "F12") {
       e.preventDefault();
       if (editing) commit(0, 0);
@@ -1285,6 +1293,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       { label: "Sort Z → A", onRun: () => sort(false), icon: "sortDesc" },
       { label: "Clear contents", shortcut: "Del", onRun: clear, separatorBefore: true, icon: "clear" },
       { label: "Clear formatting", onRun: () => format("clear", "") },
+      { label: "Format Cells…", shortcut: `${mod}1`, onRun: () => setFormatDialog("number") },
       { label: "Insert Function…", shortcut: "⇧F3", onRun: openInsertFunction, separatorBefore: true, icon: "function" },
     ];
     setMenu({ x, y, items });
@@ -1414,7 +1423,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
           title: "Choose how values in your cells are displayed: as a percentage, currency, date or time, etc.",
           group: "Number",
           render: () => (
-            <Select className="number-format" aria-label="Number format" value={formatKind} onChange={(e) => format("format", e.target.value)}>
+            <Select className="number-format" aria-label="Number format" value={formatKind} onChange={(e) => (e.target.value === "more" ? setFormatDialog("number") : e.target.value !== "custom" && format("format", e.target.value))}>
               <option value="general">General</option>
               <option value="number">Number (1,234.50)</option>
               <option value="currency">Rupee (₹1,234.50)</option>
@@ -1424,6 +1433,8 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
               <option value="time">Time (14:30)</option>
               <option value="datetime">Date &amp; time</option>
               <option value="text">Text</option>
+              {formatKind === "custom" && <option value="custom">Custom</option>}
+              <option value="more">More Number Formats…</option>
             </Select>
           ),
         },
@@ -1469,6 +1480,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
           group: "Cells",
           menu: [
             ...formatMenuItems(layoutCtx),
+            { id: "menu-format-cells", label: "Format Cells…", shortcut: `${MOD_KEY}1`, icon: "formatCells", onRun: () => setFormatDialog("number"), separatorBefore: true },
             { id: "menu-rename-sheet", label: "Rename Sheet", icon: "rename", onRun: () => setRenamingTab(sheet), separatorBefore: true },
           ],
         },
@@ -1763,6 +1775,28 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       )}
       {insertFunctionOpen && <InsertFunctionDialog onInsert={closeInsertFunction} onClose={() => closeInsertFunction(null)} />}
       {renderDataDialog()}
+      {formatDialog && (
+        <FormatCellsDialog
+          style={activeStyle}
+          sample={doc.input(sheet, row, col).startsWith("=") ? "" : doc.input(sheet, row, col)}
+          initialTab={formatDialog}
+          onApply={(changes) => {
+            let r: Rect | null = sel;
+            if ((r.bottom - r.top + 1) * (r.right - r.left + 1) > MAX_FORMAT_CELLS) r = dataRect();
+            if (!r) return;
+            doc.formatRangeMany(sheet, r.top, r.left, r.bottom, r.right, changes.map((c) => c[0]), changes.map((c) => c[1]));
+            changed();
+          }}
+          onBorders={(preset, style, color) => {
+            doc.applyBorders(sheet, sel.top, sel.left, sel.bottom, sel.right, preset, style, color);
+            changed();
+          }}
+          onClose={() => {
+            setFormatDialog(null);
+            cellInputRef.current?.focus({ preventScroll: true });
+          }}
+        />
+      )}
       {galleryOpen && <ShapesGallery onPick={shapeCtx.startDrawing} onClose={() => setGalleryOpen(false)} />}
       {printOpen && (
         <PrintView

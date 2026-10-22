@@ -57,7 +57,7 @@ export const ValueKind = {
   Error: 4,
 } as const;
 
-export type NumberFormatKind = "general" | "number" | "currency" | "percent" | "date" | "time" | "datetime" | "text";
+export type NumberFormatKind = "general" | "number" | "currency" | "percent" | "date" | "time" | "datetime" | "text" | "custom";
 
 /** Matches `style_json` in crates/wasm/src/lib.rs. */
 export interface CellStyle {
@@ -69,6 +69,8 @@ export interface CellStyle {
   fill?: string;
   align?: "left" | "center" | "right";
   fmt?: NumberFormatKind;
+  /** The Excel format code (present whenever `fmt` is). */
+  code?: string;
   /** Font family; absent = the default (Calibri). */
   font?: string;
   /** Font size in points; absent = 11. */

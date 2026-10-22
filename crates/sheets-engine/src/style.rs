@@ -144,6 +144,8 @@ pub enum NumberFormat {
     DateTime,
     /// Show the input as typed, never as a number.
     Text,
+    /// Any other Excel format code, e.g. `dd-mmm-yyyy`, `#,##0.0,"K"`, `[Red]0.00` (see `numfmt.rs`).
+    Custom(String),
 }
 
 impl NumberFormat {
@@ -158,6 +160,7 @@ impl NumberFormat {
                 NumberFormat::Currency { symbol: symbol.clone(), decimals: change(*decimals) }
             }
             NumberFormat::Percent { decimals } => NumberFormat::Percent { decimals: change(*decimals) },
+            NumberFormat::Custom(code) => NumberFormat::from_code(&custom_decimals(code, delta)),
             other => other.clone(),
         }
     }
@@ -178,52 +181,118 @@ impl NumberFormat {
             NumberFormat::Time => "hh:mm".into(),
             NumberFormat::DateTime => "dd-mm-yyyy hh:mm".into(),
             NumberFormat::Text => "@".into(),
+            NumberFormat::Custom(code) => code.clone(),
         }
     }
 
-    /// Best-effort reading of an Excel format code (from `.xlsx` files).
+    /// The format for an Excel format code (from `.xlsx` files or the Format
+    /// Cells dialog). Codes our toolbar formats write map back to them; Excel's
+    /// locale-dependent short date (built-in format 14) is our date; anything
+    /// else is kept exactly as `Custom`.
     pub fn from_code(code: &str) -> NumberFormat {
-        // Ignore quoted literals and [..] sections when looking for date letters.
-        let mut plain = String::new();
-        let mut in_quote = false;
-        let mut in_bracket = false;
-        for ch in code.split(';').next().unwrap_or("").chars() {
-            match ch {
-                '"' => in_quote = !in_quote,
-                '[' if !in_quote => in_bracket = true,
-                ']' if !in_quote => in_bracket = false,
-                _ if !in_quote && !in_bracket => plain.push(ch.to_ascii_lowercase()),
-                _ => {}
-            }
+        let code = code.trim();
+        if code.is_empty() || code.eq_ignore_ascii_case("general") {
+            return NumberFormat::General;
         }
         if code == "@" {
             return NumberFormat::Text;
         }
-        if plain.is_empty() || plain == "general" {
-            return NumberFormat::General;
-        }
-        let has_date = plain.contains('y') || plain.contains('d') || plain.contains("mmm");
-        let has_time = plain.contains('h') || plain.contains('s');
-        if has_date && has_time {
-            return NumberFormat::DateTime;
-        }
-        if has_time {
-            return NumberFormat::Time;
-        }
-        // A lone "m"/"mm" without digits placeholders is a month.
-        if has_date || (plain.contains('m') && !plain.contains('0') && !plain.contains('#')) {
+        if matches!(
+            code.to_ascii_lowercase().as_str(),
+            "mm-dd-yy" | "m/d/yyyy" | "m/d/yy" | "dd-mm-yyyy" | "dd/mm/yyyy"
+        ) {
             return NumberFormat::Date;
         }
-        let decimals = plain.split_once('.').map_or(0, |(_, frac)| frac.chars().filter(|c| *c == '0').count()) as u8;
-        if plain.contains('%') {
-            return NumberFormat::Percent { decimals };
+        let simple = [
+            NumberFormat::Date,
+            NumberFormat::Time,
+            NumberFormat::DateTime,
+            NumberFormat::Percent { decimals: 0 },
+            NumberFormat::Percent { decimals: 1 },
+            NumberFormat::Percent { decimals: 2 },
+        ];
+        if let Some(f) = simple.into_iter().find(|f| f.to_code() == code) {
+            return f;
         }
-        let symbol = ["₹", "$", "€", "£", "¥"].into_iter().find(|s| code.contains(s));
-        if let Some(symbol) = symbol {
-            return NumberFormat::Currency { symbol: symbol.into(), decimals };
+        for decimals in 0..=10u8 {
+            for f in [
+                NumberFormat::Number { decimals, thousands: true },
+                NumberFormat::Number { decimals, thousands: false },
+                NumberFormat::Currency { symbol: "₹".into(), decimals },
+                NumberFormat::Currency { symbol: "$".into(), decimals },
+                NumberFormat::Currency { symbol: "€".into(), decimals },
+                NumberFormat::Currency { symbol: "£".into(), decimals },
+                NumberFormat::Currency { symbol: "¥".into(), decimals },
+                NumberFormat::Percent { decimals },
+            ] {
+                if f.to_code() == code {
+                    return f;
+                }
+            }
         }
-        NumberFormat::Number { decimals, thousands: plain.contains(',') }
+        NumberFormat::Custom(code.to_string())
     }
+}
+
+/// A custom code with one more (`delta > 0`) or one fewer decimal place in each
+/// numeric section: `#,##0` -> `#,##0.0`, `0.00"kg"` -> `0.0"kg"`. Date codes are left alone.
+fn custom_decimals(code: &str, delta: i8) -> String {
+    let lower = code.to_ascii_lowercase();
+    if ["y", "d", "h", "s", "mm"].iter().any(|t| lower.replace("\"", "").contains(t)) && !lower.contains('0') {
+        return code.to_string();
+    }
+    let sections: Vec<String> = split_unquoted(code, ';')
+        .into_iter()
+        .map(|sec| {
+            let chars: Vec<char> = sec.chars().collect();
+            // Last digit placeholder outside quotes.
+            let mut quote = false;
+            let mut last_digit = None;
+            let mut point = None;
+            for (i, c) in chars.iter().enumerate() {
+                match c {
+                    '"' => quote = !quote,
+                    '0' | '#' | '?' if !quote => last_digit = Some(i),
+                    '.' if !quote => point = Some(i),
+                    _ => {}
+                }
+            }
+            let Some(last) = last_digit else { return sec };
+            let mut out = chars.clone();
+            if delta > 0 {
+                if point.is_some() {
+                    out.insert(last + 1, '0');
+                } else {
+                    out.splice(last + 1..last + 1, ['.', '0']);
+                }
+            } else if let Some(p) = point {
+                if last > p {
+                    out.remove(last);
+                    if last == p + 1 {
+                        out.remove(p);
+                    }
+                }
+            }
+            out.into_iter().collect()
+        })
+        .collect();
+    sections.join(";")
+}
+
+fn split_unquoted(s: &str, sep: char) -> Vec<String> {
+    let mut out = vec![String::new()];
+    let mut quote = false;
+    for c in s.chars() {
+        if c == '"' {
+            quote = !quote;
+        }
+        if c == sep && !quote {
+            out.push(String::new());
+        } else {
+            out.last_mut().unwrap().push(c);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -301,10 +370,18 @@ mod tests {
             assert_eq!(NumberFormat::from_code(&f.to_code()), f, "{}", f.to_code());
         }
         assert_eq!(NumberFormat::from_code("m/d/yy"), NumberFormat::Date);
-        assert_eq!(NumberFormat::from_code("mm-dd-yy h:mm"), NumberFormat::DateTime);
-        assert_eq!(
-            NumberFormat::from_code("#,##0.00_);(#,##0.00)"),
-            NumberFormat::Number { decimals: 2, thousands: true }
-        );
+        // Everything else is kept exactly, so it displays (and saves) as in Excel.
+        for code in ["mm-dd-yy h:mm", "#,##0.00_);(#,##0.00)", "dd-mmm-yyyy", "[Red]0.0"] {
+            assert_eq!(NumberFormat::from_code(code), NumberFormat::Custom(code.into()));
+        }
+    }
+
+    #[test]
+    fn decimals_change_in_custom_codes() {
+        let step = |code: &str, d: i8| NumberFormat::Custom(code.into()).with_decimals_changed(d).to_code();
+        assert_eq!(step("#,##0\" kg\"", 1), "#,##0.0\" kg\"");
+        assert_eq!(step("0.00;[Red]-0.00", -1), "0.0;[Red]-0.0");
+        assert_eq!(step("0.0\"x\"", -1), "0\"x\"");
+        assert_eq!(step("dd-mmm-yyyy", 1), "dd-mmm-yyyy");
     }
 }

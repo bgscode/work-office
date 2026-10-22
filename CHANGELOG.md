@@ -14,6 +14,8 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Added
 
+- Number formats: every Excel format code now displays exactly as in Excel — sections (positive;negative;zero;text), colours (`[Red]`), conditions (`[>=1000]`), thousands scaling (`#,##0,"K"`), literals, dates and times (`dd-mmm-yyyy`, `dddd`, `h:mm AM/PM`, `[h]:mm:ss`, `.000`), fractions, scientific and accounting formats. Codes in .xlsx files are kept as they are instead of being simplified. Format Cells dialog (Ctrl+1, right-click, Number box → More Number Formats…) with Number (General, Number, Currency, Accounting, Date, Time, Percentage, Fraction, Scientific, Text, Custom with a live sample), Alignment, Font, Border and Fill tabs; one undo step.
+
 - Charts: double-click a chart title to edit it in place; Change Colors now recolours pie and doughnut slices (slice colours are saved in .xlsx).
 - Ribbon: on narrow windows groups fold into one button each, from the right, like Excel; the button opens the group's commands.
 

@@ -240,7 +240,16 @@ impl SheetsDocument {
     #[wasm_bindgen(js_name = styleBlock)]
     pub fn style_block(&self, sheet: usize, row: u32, col: u32, rows: u32, cols: u32) -> Vec<String> {
         let s = self.sheet(sheet);
-        block(row, col, rows, cols).map(|at| style_json(s.style(at))).collect()
+        block(row, col, rows, cols)
+            .map(|at| {
+                let style = s.style(at);
+                // `[Red]` and other colours in custom formats depend on the value.
+                match sheets_engine::format::format_color(s.value(at), &style.number_format) {
+                    Some(c) => style_json(&Style { color: Some(c.to_string()), ..style.clone() }),
+                    None => style_json(style),
+                }
+            })
+            .collect()
     }
 
     /// [count of non-empty cells, count of numbers, sum of numbers] for the status bar.
@@ -351,6 +360,48 @@ impl SheetsDocument {
         let styles = rect(top, left, bottom, right).cells().map(|at| (at, s.style(at).patched(&patch))).collect();
         self.apply(SetStyles { sheet, styles });
         Ok(())
+    }
+
+    /// Several formatting changes (`keys[i]` = `values[i]`, keys as in
+    /// `formatRange`) to a rectangle as one undo step: the Format Cells dialog's OK.
+    #[wasm_bindgen(js_name = formatRangeMany)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn format_range_many(
+        &mut self,
+        sheet: usize,
+        top: u32,
+        left: u32,
+        bottom: u32,
+        right: u32,
+        keys: Vec<String>,
+        values: Vec<String>,
+    ) -> Result<(), JsError> {
+        let patches: Vec<StylePatch> = keys
+            .iter()
+            .zip(&values)
+            .map(|(k, v)| parse_patch(k, v).ok_or_else(|| JsError::new(&format!("unknown format {k}={v}"))))
+            .collect::<Result<_, _>>()?;
+        if patches.is_empty() {
+            return Ok(());
+        }
+        let s = self.sheet(sheet);
+        let styles = rect(top, left, bottom, right)
+            .cells()
+            .map(|at| (at, patches.iter().fold(s.style(at).clone(), |st, p| st.patched(p))))
+            .collect();
+        self.apply(SetStyles { sheet, styles });
+        Ok(())
+    }
+
+    /// How `input` (as typed in a cell) looks under the format code `code`,
+    /// for the Format Cells preview. Returns [text, colour or ""].
+    #[wasm_bindgen(js_name = previewFormat)]
+    pub fn preview_format(input: &str, code: &str) -> Vec<String> {
+        let value = Value::from_input(input);
+        let nf = NumberFormat::from_code(code);
+        let text = sheets_engine::format::format_value(&value, &nf);
+        let color = sheets_engine::format::format_color(&value, &nf).unwrap_or("").to_string();
+        vec![text, color]
     }
 
     /// Column widths that differ from the default, flattened as [col, px, col, px, ...].
@@ -567,6 +618,8 @@ fn parse_patch(key: &str, value: &str) -> Option<StylePatch> {
             "text" => NumberFormat::Text,
             _ => return None,
         }),
+        // Any Excel format code (Format Cells → Custom).
+        "numfmt" => StylePatch::NumberFormat(NumberFormat::from_code(value)),
         _ => return None,
     })
 }
@@ -607,9 +660,12 @@ fn style_json(s: &Style) -> String {
         NumberFormat::Time => Some("time"),
         NumberFormat::DateTime => Some("datetime"),
         NumberFormat::Text => Some("text"),
+        NumberFormat::Custom(_) => Some("custom"),
     };
     if let Some(f) = fmt {
         parts.push(format!("\"fmt\":\"{f}\""));
+        // The exact code, for the Format Cells dialog.
+        parts.push(format!("\"code\":{}", json_string(&s.number_format.to_code())));
     }
     parts.extend(formatting_json(s));
     format!("{{{}}}", parts.join(","))
