@@ -72,13 +72,13 @@ describe("buildPrintHtml", () => {
     expect(html).toContain('<td style="font-weight:bold;color:#C00000;background:#FFF2CC;text-align:center">Item</td>');
     expect(html).toContain('<td style="text-align:right">12.5</td>');
     expect(html).toContain("&lt;b&gt;&amp;");
-    expect(html).toContain("@page s0{size:8.26771653543307in 11.69291338582677in;margin:0}");
+    expect(html).toContain("@page s0{size:8.2677in 11.6929in;margin:0}");
   });
 
   it("shows ### for numbers that don't fit and spills long text", () => {
     const long = "A long heading that needs room";
     const html = buildPrintHtml(job([source([[123456789012345], [long, "", "x"]], setup())]), layoutJob(job([source([[123456789012345], [long, "", "x"]], setup())])));
-    expect(html).toContain(">############</td>");
+    expect(html).toContain(">#############</td>");
     expect(html).toContain(`<td colspan="2">${long}</td>`);
   });
 
@@ -107,7 +107,7 @@ describe("buildPrintHtml", () => {
     const pages = layoutJob(j);
     expect(pages.length).toBe(1);
     expect(pages[0].scale).toBeLessThan(0.4);
-    expect(buildPrintHtml(j, pages)).toContain("size:11.69291338582677in 8.26771653543307in");
+    expect(buildPrintHtml(j, pages)).toContain("size:11.6929in 8.2677in");
   });
 
   it("skips sheets with nothing to print", () => {

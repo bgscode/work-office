@@ -66,6 +66,18 @@ updates live. The UI turns anchors into pixels with the grid's layout
 (`charts/renderChart.ts`). `.xlsx` drawings, charts and media are read and
 written by `crates/formats/src/xlsx/drawings.rs`.
 
+## Printing
+
+`apps/web/src/sheets/print/`: `printJob.ts` collects what to print from the
+workbook (selection, print area or used range, sizes from the grid layout,
+formatted cells, merges, charts rendered to images); `pagination.ts` splits it
+into pages like Excel (down, then over; print titles repeated); `printHtml.ts`
+writes one HTML page per sheet of paper, used both by the preview
+(`PrintView.tsx`) and by the real print in a hidden frame — so the preview is
+exactly what prints, and the browser's "Save as PDF" gives PDF export. Page
+setup lives in the engine (`page_setup.rs`, `SetPageSetup` op) and is saved in
+`.xlsx` by `xlsx_page_setup.rs`.
+
 ## Kinds of edits
 
 | Edit | Engine op | Undo |
@@ -77,6 +89,7 @@ written by `crates/formats/src/xlsx/drawings.rs`.
 | Insert/delete rows or columns, sort | `ReplaceSheet` (formulas rewritten by `formula/refs.rs`) | the old sheet |
 | Filter, data validation, conditional formatting | `SetDataTools` (`data_tools.rs`) | previous settings |
 | Insert, move, resize, format or delete a chart or picture | `SetDrawings` (`chart.rs`) | previous drawings |
+| Page setup (Page Layout tab, Page Setup dialog) | `SetPageSetup` (`page_setup.rs`) | previous settings |
 | Remove duplicates, custom sort, sort from a filter | `ReplaceSheet` | the old sheet |
 | Add/rename/delete sheet | `InsertSheet`, `RenameSheet`, `RemoveSheet` | the inverse op |
 

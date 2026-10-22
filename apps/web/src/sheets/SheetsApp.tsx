@@ -6,7 +6,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { SheetsDocument, ValueKind, functionList, parseStyle, type FunctionInfo } from "@office/engine";
 import { Ribbon, type RibbonTab } from "@office/ui";
-import { download, pickFile } from "../files";
+import { download, hasSaveTarget, pickFile, save as saveFile, saveAs as saveFileAs } from "../files";
+import { PrintView } from "./print/PrintView";
+import { PageSetupDialog, type PageSetupTab } from "./print/PageSetupDialog";
+import { readPageSetup, updatePageSetup } from "./print/pageSetup";
+import { pageLayoutCommands } from "./features/pageLayout";
 import { saveDocument, touchDocument } from "../documents";
 import type { Journal } from "./journal";
 import { parseTsv, toTsv } from "./clipboard";
@@ -142,6 +146,10 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
   const [savedRevision, setSavedRevision] = useState(0);
   const [saveFailed, setSaveFailed] = useState(false);
   const changed = () => setRevision((r) => r + 1);
+  // Files and printing: File → Print view, Page Setup dialog, a short "saved" note.
+  const [printOpen, setPrintOpen] = useState(false);
+  const [pageSetupTab, setPageSetupTab] = useState<PageSetupTab | null>(null);
+  const [fileNote, setFileNote] = useState("");
   // Charts and pictures: the selected drawing, its dialog, and ribbon tab switching.
   const [selectedDrawing, setSelectedDrawing] = useState<number | null>(null);
   const [chartDialog, setChartDialog] = useState<ChartDialog | null>(null);
@@ -1103,7 +1111,22 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
 
   const chromeKeys = useRef<(e: globalThis.KeyboardEvent) => void>(() => {});
   chromeKeys.current = (e) => {
-    if (e.key === "F3" && e.shiftKey && !insertFunctionOpen) {
+    const mod = e.metaKey || e.ctrlKey;
+    const key = e.key.toLowerCase();
+    if (mod && !e.altKey && key === "s") {
+      // Ctrl+S saves to disk; Ctrl+Shift+S... is Save As in many apps; F12 is Excel's.
+      e.preventDefault();
+      if (editing) commit(0, 0);
+      void saveWorkbook(e.shiftKey);
+    } else if (mod && !e.altKey && !e.shiftKey && key === "p") {
+      e.preventDefault();
+      if (editing) commit(0, 0);
+      setPrintOpen(true);
+    } else if (e.key === "F12") {
+      e.preventDefault();
+      if (editing) commit(0, 0);
+      void saveWorkbook(true);
+    } else if (e.key === "F3" && e.shiftKey && !insertFunctionOpen) {
       e.preventDefault();
       openInsertFunction();
     } else if (e.key === "F11" && e.shiftKey) {
@@ -1120,8 +1143,35 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
 
   // ---- files
 
+  /** Ctrl+S: write the .xlsx to its file on disk (asks where the first time); `as` forces Save As. */
+  async function saveWorkbook(as = false) {
+    const bytes = new Uint8Array(doc.toXlsx());
+    const name = `${fileName}.xlsx`;
+    const result = as ? await saveFileAs(docId, bytes, name, XLSX_MIME, ".xlsx") : await saveFile(docId, bytes, name, XLSX_MIME, ".xlsx");
+    if (result.kind === "saved") showFileNote(`Saved to ${result.name}`);
+    else if (result.kind === "downloaded") showFileNote(`Downloaded ${name}`);
+  }
+
+  const noteTimer = useRef<ReturnType<typeof setTimeout>>();
+  function showFileNote(text: string) {
+    setFileNote(text);
+    clearTimeout(noteTimer.current);
+    noteTimer.current = setTimeout(() => setFileNote(""), 4000);
+  }
+
+  const pageCtx = {
+    setup: readPageSetup(doc, sheet),
+    change(changes: Record<string, string>) {
+      const err = updatePageSetup(doc, sheet, changes);
+      if (err) setMessage({ title: "Page Setup", message: err });
+      else changed();
+    },
+    selectionRef: rangeName({ anchor: { row: sel.top, col: sel.left }, focus: { row: sel.bottom, col: sel.right } }),
+    openPageSetup: setPageSetupTab,
+  };
+
   async function open() {
-    const file = await pickFile(".xlsx,.csv");
+    const file = await pickFile(".xlsx,.csv,.tsv,.txt");
     if (file) onOpenFile(file);
   }
 
@@ -1207,6 +1257,18 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       commands: [
         { id: "new", label: "New", title: "Start a new, empty workbook.", icon: "newDocument", size: "large", group: "Workbook", onRun: newDocument },
         { id: "open", label: "Open…", title: "Open an .xlsx or .csv file from your computer.", icon: "open", size: "large", group: "Workbook", onRun: open },
+        {
+          id: "save",
+          label: "Save",
+          shortcut: `${MOD_KEY}S`,
+          title: hasSaveTarget(docId) ? "Save the workbook to its file on your computer." : "Save the workbook as an .xlsx file on your computer. Your work is also saved in this browser automatically.",
+          icon: "save",
+          size: "large",
+          group: "Save",
+          onRun: () => void saveWorkbook(),
+        },
+        { id: "save-as", label: "Save As", shortcut: "F12", title: "Save the workbook to a new file.", icon: "excelFile", size: "large", group: "Save", onRun: () => void saveWorkbook(true) },
+        { id: "print", label: "Print", shortcut: `${MOD_KEY}P`, title: "Preview and print the sheet, or save it as PDF.", icon: "print", size: "large", group: "Print", onRun: () => setPrintOpen(true) },
         {
           id: "save-xlsx",
           label: "Download .xlsx",
@@ -1397,6 +1459,11 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       ],
     },
     {
+      id: "page-layout",
+      label: "Page Layout",
+      commands: pageLayoutCommands(pageCtx),
+    },
+    {
       id: "formulas",
       label: "Formulas",
       commands: [
@@ -1456,7 +1523,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
         }}
         onDone={() => cellInputRef.current?.focus({ preventScroll: true })}
         status={saveStatus}
-        onSave={() => download(new Uint8Array(doc.toXlsx()), `${fileName}.xlsx`, XLSX_MIME)}
+        onSave={() => void saveWorkbook()}
         onUndo={undo}
         onRedo={redo}
       />
@@ -1583,7 +1650,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
           renaming={renamingTab}
           setRenaming={setRenamingTab}
         />
-        <StatusBar doc={doc} sheet={sheet} rect={dataRect()} mode={statusMode(editing, pointMode)} note={filterStatus} zoom={zoom} onZoom={setZoom} />
+        <StatusBar doc={doc} sheet={sheet} rect={dataRect()} mode={statusMode(editing, pointMode)} note={fileNote || filterStatus} zoom={zoom} onZoom={setZoom} />
       </footer>
       <FormulaAssist
         anchor={activeInput?.getBoundingClientRect() ?? null}
@@ -1612,6 +1679,31 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
       )}
       {insertFunctionOpen && <InsertFunctionDialog onInsert={closeInsertFunction} onClose={() => closeInsertFunction(null)} />}
       {renderDataDialog()}
+      {printOpen && (
+        <PrintView
+          doc={doc}
+          sheet={sheet}
+          selection={sel}
+          title={fileName}
+          revision={revision}
+          onChanged={changed}
+          onPageSetup={() => setPageSetupTab("page")}
+          onClose={() => {
+            setPrintOpen(false);
+            cellInputRef.current?.focus({ preventScroll: true });
+          }}
+        />
+      )}
+      {pageSetupTab && (
+        <PageSetupDialog
+          doc={doc}
+          sheet={sheet}
+          initialTab={pageSetupTab}
+          onDone={changed}
+          onPrintPreview={() => setPrintOpen(true)}
+          onClose={() => setPageSetupTab(null)}
+        />
+      )}
       {chartDialog === "titles" && selectedChart && (
         <ChartTitlesDialog info={selectedChart.info} onApply={(k, v) => formatChart(k, v)} onClose={() => setChartDialog(null)} />
       )}

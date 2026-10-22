@@ -18,3 +18,64 @@ export function download(data: BlobPart, fileName: string, type: string) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// ---------------------------------------------------------------- saving to disk
+
+/** The parts of the File System Access API we use (Chromium browsers). */
+interface WritableFile {
+  createWritable(): Promise<{ write(data: BlobPart): Promise<void>; close(): Promise<void> }>;
+  name: string;
+}
+type SavePicker = (opts: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) => Promise<WritableFile>;
+
+/** Files chosen with Save As in this session, per workbook: Save writes back to them. */
+const handles = new Map<string, WritableFile>();
+
+export type SaveResult = { kind: "saved"; name: string } | { kind: "downloaded" } | { kind: "cancelled" };
+
+/** True when Save writes straight to a file on disk (no download). */
+export function hasSaveTarget(key: string): boolean {
+  return handles.has(key);
+}
+
+/**
+ * Save As: let the user pick a file on disk (Chromium) and remember it, or
+ * download a copy where the browser can't write files.
+ */
+export async function saveAs(key: string, data: BlobPart, fileName: string, mime: string, ext: string): Promise<SaveResult> {
+  const picker = (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker;
+  if (!picker) {
+    download(data, fileName, mime);
+    return { kind: "downloaded" };
+  }
+  try {
+    const handle = await picker({ suggestedName: fileName, types: [{ description: "Excel Workbook", accept: { [mime]: [ext] } }] });
+    handles.set(key, handle);
+    await write(handle, data);
+    return { kind: "saved", name: handle.name };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") return { kind: "cancelled" };
+    download(data, fileName, mime);
+    return { kind: "downloaded" };
+  }
+}
+
+/** Save (Ctrl+S): write to the file from the last Save As, else Save As. */
+export async function save(key: string, data: BlobPart, fileName: string, mime: string, ext: string): Promise<SaveResult> {
+  const handle = handles.get(key);
+  if (!handle) return saveAs(key, data, fileName, mime, ext);
+  try {
+    await write(handle, data);
+    return { kind: "saved", name: handle.name };
+  } catch {
+    // Permission revoked or file moved: ask again.
+    handles.delete(key);
+    return saveAs(key, data, fileName, mime, ext);
+  }
+}
+
+async function write(handle: WritableFile, data: BlobPart) {
+  const w = await handle.createWritable();
+  await w.write(data);
+  await w.close();
+}

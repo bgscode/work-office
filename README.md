@@ -27,7 +27,8 @@ Opening the app shows a start page like Microsoft 365's: create a blank workbook
 - Cell layout: borders, fonts, wrap text, merge & center, row heights, hide/unhide, freeze panes
 - Data tools: filter dropdowns, custom sort, remove duplicates, data validation (dropdown lists, limits, alerts), conditional formatting (highlight rules, data bars, colour scales)
 - Charts (column, bar, line, area, pie, doughnut, scatter) that update live with the data, and pictures; move, resize, titles, legend, data labels, colours
-- Open and save **.xlsx** (values, formulas, formatting, layout, data tools, charts, pictures) and **.csv**
+- Open and save **.xlsx** (values, formulas, formatting, layout, data tools, charts, pictures, page setup) and **.csv** (also .tsv/.txt, delimiter detected); Ctrl+S saves to a file on disk
+- Print with preview and export PDF (Ctrl+P): page setup, print area, titles on every page, headers/footers, fit to page
 - Multiple sheets (add, rename, delete), undo/redo for everything, autosave in the browser
 - Copy/paste with Excel and Google Sheets; inside Office, paste keeps formulas and formatting
 - Typing in any language, including IME input (Hindi, Chinese, Japanese…)
@@ -59,6 +60,8 @@ Opening the app shows a start page like Microsoft 365's: create a blank workbook
 | Ctrl/⌘ + D / R | Fill down / right within the selection |
 | Ctrl/⌘ + F / Ctrl + H | Find / Find and replace |
 | Ctrl/⌘ + mouse wheel | Zoom |
+| Ctrl/⌘ + S, F12 | Save to disk, Save As |
+| Ctrl/⌘ + P | Print / PDF |
 | Ctrl/⌘ + Shift + L | Filter on/off |
 | Alt + ↓ | Open the cell's dropdown list or the column's filter |
 | Delete (chart or picture selected) | Delete it; arrows nudge it, Esc goes back to the cells |

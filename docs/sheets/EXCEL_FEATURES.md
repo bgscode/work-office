@@ -141,9 +141,10 @@ When you finish an item, update its row in the same pull request.
 |---|---|---|---|
 | Open/save `.xlsx`: values, formulas, formatting, number formats, column widths | ✅ | P1 | – |
 | Open/save `.csv` | ✅ | P1 | – |
-| Save back to the same file on disk (Ctrl+S, no re-download), recent files | ⬜ | P1 | M6 |
-| Print and export to PDF (print area, fit to page width, portrait/landscape) | ⬜ | P1 | M6 |
-| `.xlsx` round-trip for every M1–M5 feature (borders, merges, fonts, row heights, freeze panes, filters, validation, conditional formatting, charts) | ⬜ | P1 | M6 |
+| Save back to the same file on disk (Ctrl+S, Save As / F12; Chromium browsers, download elsewhere), recent files | ✅ | P1 | M6 |
+| Print and export to PDF: File → Print with preview (Ctrl+P), Page Layout tab, Page Setup dialog (margins, orientation, paper, scaling, print area, print titles, header/footer, gridlines, headings); charts and pictures print | ✅ | P1 | M6 |
+| `.xlsx` round-trip for every M1–M5 feature (borders, merges, fonts, row heights, freeze panes, filters, validation, conditional formatting, charts, page setup) — `crates/formats/tests/round_trip.rs` | ✅ | P1 | M6 |
+| Open delimited text with the delimiter detected (.csv, .tsv, .txt; comma, semicolon, tab, pipe) | ✅ | P1 | M6 |
 | Page setup: margins, headers/footers, repeat header rows | ⬜ | P2 | – |
 | CSV options: delimiter, encoding | ⬜ | P2 | – |
 | `.ods` (LibreOffice) | ⬜ | P2 | – |

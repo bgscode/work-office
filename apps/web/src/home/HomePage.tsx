@@ -56,7 +56,7 @@ export function HomePage({ onOpenDocument, onNew, onOpenFile }: Props) {
   );
 
   async function open() {
-    const file = await pickFile(".xlsx,.csv");
+    const file = await pickFile(".xlsx,.csv,.tsv,.txt");
     if (file) onOpenFile(file);
   }
 
@@ -64,7 +64,7 @@ export function HomePage({ onOpenDocument, onNew, onOpenFile }: Props) {
     e.preventDefault();
     setDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file && /\.(xlsx|csv)$/i.test(file.name)) onOpenFile(file);
+    if (file && /\.(xlsx|csv|tsv|txt)$/i.test(file.name)) onOpenFile(file);
   }
 
   return (

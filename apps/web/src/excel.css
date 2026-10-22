@@ -1808,3 +1808,192 @@ textarea.cell-editor {
 .ribbon-tabs > button.contextual {
   color: var(--xl-green-dark);
 }
+
+/* ---------------------------------------------------------------- File → Print */
+
+.print-view {
+  position: fixed;
+  inset: 40px 0 0 0;
+  z-index: 50;
+  display: flex;
+  background: #fff;
+}
+
+.print-settings {
+  width: 300px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 20px 20px;
+  overflow-y: auto;
+  border-right: 1px solid var(--xl-border);
+  background: #fff;
+}
+
+.print-settings h3 {
+  margin: 14px 0 2px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.print-settings .xl-select {
+  width: 100%;
+  height: 40px;
+  font-size: 13px;
+}
+
+.print-back {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px -8px;
+  padding: 6px 8px;
+  border: 0;
+  background: none;
+  font: 300 26px "Segoe UI", system-ui, sans-serif;
+  color: var(--xl-text);
+}
+
+.print-back:hover {
+  background: var(--xl-hover);
+}
+
+.print-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.print-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 96px;
+  padding: 10px 6px;
+  border: 1px solid var(--xl-border-strong);
+  background: #fff;
+  font: 13px "Segoe UI", system-ui, sans-serif;
+}
+
+.print-button:hover:not(:disabled) {
+  background: var(--xl-green-light);
+  border-color: var(--xl-green);
+}
+
+.print-button:disabled {
+  opacity: 0.5;
+}
+
+.print-hint {
+  margin: 0;
+  color: var(--xl-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.print-link {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #0f6cbd;
+  font: 13px "Segoe UI", system-ui, sans-serif;
+  text-decoration: underline;
+}
+
+.print-preview {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: #e6e6e6;
+}
+
+.print-page-area {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.print-page {
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+}
+
+.print-page iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+.print-empty {
+  color: var(--xl-muted);
+  font-size: 14px;
+}
+
+.print-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 36px;
+  font-size: 12px;
+}
+
+.print-nav button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  background: none;
+}
+
+.print-nav button:hover:not(:disabled) {
+  background: var(--xl-hover);
+}
+
+/* Labelled boxes inside ribbon groups (Scale to Fit) */
+.ribbon-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.ribbon-field > span {
+  width: 44px;
+}
+
+.ribbon-field .xl-select {
+  width: 104px;
+  height: 22px;
+}
+
+.dialog-grid3 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0 16px;
+}
+
+/* The ribbon resets its buttons; a Select inside keeps its box. */
+.ribbon-commands button.xl-select {
+  padding: 0 4px 0 6px;
+  border: 1px solid var(--xl-border-strong);
+  border-radius: 0;
+  background: #fff;
+}
+
+.ribbon-commands button.xl-select:hover:not(:disabled) {
+  border-color: #8a8886;
+  background: #fff;
+}

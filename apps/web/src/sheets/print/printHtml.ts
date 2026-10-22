@@ -57,6 +57,21 @@ export interface SheetSource {
   colWidth(col: number): number;
   rowHeight(row: number): number;
   block(r: Rect): CellBlock;
+  /** Merged areas (printed as one cell, clipped to the page). */
+  merges?: Rect[];
+  /** Charts and pictures as image URLs, placed in sheet pixels (from the top-left of A1). */
+  images?: PrintImage[];
+  /** Left edge of a column / top edge of a row in sheet pixels; needed for images. */
+  colX?(col: number): number;
+  rowY?(row: number): number;
+}
+
+export interface PrintImage {
+  src: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 export interface PrintJob {
@@ -76,8 +91,9 @@ export interface PageInfo {
 }
 
 export const PX_PER_INCH = 96;
-const BASE_FONT = "system-ui, -apple-system, 'Segoe UI', sans-serif";
-const BASE_SIZE_PX = 13;
+/** Excel's default: Calibri 11pt. */
+const BASE_FONT = "Calibri, Carlito, 'Segoe UI', Arial, sans-serif";
+const BASE_SIZE_PX = 15;
 const CELL_PAD = 4;
 const HEADING_HEIGHT = 20;
 
@@ -236,10 +252,27 @@ function pageTable(job: PrintJob, page: PageInfo): string {
   const rows = linesOf(page.row).filter((r) => src.rowHeight(r) > 0);
   const cols = linesOf(page.col).filter((c) => src.colWidth(c) > 0);
   const cell = pageCells(src, rows, cols);
+  // Merged areas: the first printed cell of each gets row/colspan over the printed lines it covers.
+  const rowIndex = new Map(rows.map((r, i) => [r, i]));
+  const colIndex = new Map(cols.map((c, i) => [c, i]));
+  const covered = new Set<string>();
+  const spans = new Map<string, [number, number]>();
+  for (const m of src.merges ?? []) {
+    const mr = rows.filter((r) => r >= m.top && r <= m.bottom);
+    const mc = cols.filter((c) => c >= m.left && c <= m.right);
+    if (!mr.length || !mc.length || (mr.length === 1 && mc.length === 1)) continue;
+    // Only contiguous printed runs merge; titles + band are kept apart.
+    const rEnd = mr.findIndex((r, i) => i > 0 && rowIndex.get(r)! !== rowIndex.get(mr[i - 1])! + 1);
+    const cEnd = mc.findIndex((c, i) => i > 0 && colIndex.get(c)! !== colIndex.get(mc[i - 1])! + 1);
+    const rs = mr.slice(0, rEnd < 0 ? mr.length : rEnd);
+    const cs = mc.slice(0, cEnd < 0 ? mc.length : cEnd);
+    spans.set(`${rs[0]},${cs[0]}`, [rs.length, cs.length]);
+    for (const r of rs) for (const c of cs) if (r !== rs[0] || c !== cs[0]) covered.add(`${r},${c}`);
+  }
   const grid = setup.gridlines;
   const headW = setup.headings ? headingWidth(src.range?.bottom ?? 0) : 0;
 
-  let html = `<table class="${grid ? "grid" : ""}" style="zoom:${page.scale}">`;
+  let html = `<table class="${grid ? "grid" : ""}">`;
   html += "<colgroup>";
   if (headW) html += `<col style="width:${headW}px">`;
   for (const c of cols) html += `<col style="width:${src.colWidth(c)}px">`;
@@ -254,13 +287,15 @@ function pageTable(job: PrintJob, page: PageInfo): string {
     if (setup.headings) html += `<th>${r + 1}</th>`;
     for (let i = 0; i < cols.length; i++) {
       const c = cols[i];
+      if (covered.has(`${r},${c}`)) continue;
+      const merged = spans.get(`${r},${c}`);
       const { text: raw, kind, style } = cell(r, c);
       const wrap = !!style.wrap;
       let text = wrap ? raw : raw.replace(/\n/g, " ");
       const align = style.align ?? (kind === KIND_NUMBER ? "right" : kind === KIND_TEXT || !text ? "left" : "center");
       const width = src.colWidth(c);
       let span = 1;
-      if (text && !wrap) {
+      if (text && !wrap && !merged) {
         const textWidth = job.measure(text, style);
         if (kind === KIND_NUMBER && textWidth > width - 2 * CELL_PAD) {
           // Numbers that don't fit print as ### like Excel.
@@ -278,12 +313,37 @@ function pageTable(job: PrintJob, page: PageInfo): string {
         }
       }
       const css = cellCss(style, align, wrap);
-      html += `<td${span > 1 ? ` colspan="${span}"` : ""}${css ? ` style="${escapeHtml(css)}"` : ""}>${escapeHtml(text)}</td>`;
+      const colspan = merged ? merged[1] : span;
+      const rowspan = merged ? ` rowspan="${merged[0]}"` : "";
+      html += `<td${colspan > 1 ? ` colspan="${colspan}"` : ""}${rowspan}${css ? ` style="${escapeHtml(css)}"` : ""}>${escapeHtml(text)}</td>`;
       i += span - 1;
     }
     html += "</tr>";
   }
-  return html + "</table>";
+  html += "</table>";
+  return `<div class="sheet" style="zoom:${page.scale}">${html}${pageImages(src, page, headW)}</div>`;
+}
+
+/** Charts and pictures over this page's band, clipped to it. */
+function pageImages(src: SheetSource, page: PageInfo, headW: number): string {
+  if (!src.images?.length || !src.colX || !src.rowY) return "";
+  const colX = src.colX;
+  const rowY = src.rowY;
+  const titleW = page.col.titles ? colX(page.col.titles[1] + 1) - colX(page.col.titles[0]) : 0;
+  const titleH = page.row.titles ? rowY(page.row.titles[1] + 1) - rowY(page.row.titles[0]) : 0;
+  const x0 = colX(page.col.start);
+  const y0 = rowY(page.row.start);
+  const w = colX(page.col.end + 1) - x0;
+  const h = rowY(page.row.end + 1) - y0;
+  const headH = src.setup.headings ? HEADING_HEIGHT : 0;
+  const shown = src.images.filter((im) => im.x < x0 + w && im.x + im.w > x0 && im.y < y0 + h && im.y + im.h > y0);
+  if (!shown.length) return "";
+  let out = `<div class="images" style="left:${headW + titleW}px;top:${headH + titleH}px;width:${w}px;height:${h}px">`;
+  for (const im of shown) {
+    if (!/^(data:image\/|blob:)/.test(im.src)) continue;
+    out += `<img src="${escapeHtml(im.src)}" style="left:${im.x - x0}px;top:${im.y - y0}px;width:${im.w}px;height:${im.h}px">`;
+  }
+  return out + "</div>";
 }
 
 export interface HtmlOptions {
@@ -298,7 +358,9 @@ export function buildPrintHtml(job: PrintJob, pages: PageInfo[], opts: HtmlOptio
   const include = opts.include ?? pages.map((_, i) => i);
   let pageRules = "";
   job.sheets.forEach((src, i) => {
-    const { width, height } = pageInches(src.setup);
+    const size = pageInches(src.setup);
+    const width = +size.width.toFixed(4);
+    const height = +size.height.toFixed(4);
     pageRules += `@page s${i}{size:${width}in ${height}in;margin:0}.s${i}{page:s${i};width:${width}in;height:${height}in}`;
   });
   const css =
@@ -311,6 +373,8 @@ export function buildPrintHtml(job: PrintJob, pages: PageInfo[], opts: HtmlOptio
     `.area{position:absolute;display:flex;overflow:hidden}` +
     `.hf{position:absolute;display:flex;font-size:11px;white-space:pre}` +
     `.hf>div{flex:1;overflow:hidden}.hf .c{text-align:center}.hf .r{text-align:right}` +
+    `.sheet{position:relative;flex:none}` +
+    `.images{position:absolute;overflow:hidden}.images img{position:absolute}` +
     `table{border-collapse:collapse;table-layout:fixed;width:max-content;flex:none}` +
     `td,th{padding:0 ${CELL_PAD}px;overflow:hidden;white-space:pre;vertical-align:bottom;line-height:1.25;border:0}` +
     `table.grid td{border:1px solid #bfbfbf}` +

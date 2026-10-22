@@ -47,11 +47,12 @@ function load(docId: string, file: File | undefined, setStatus: (s: string) => v
 
 async function openFile(file: File, docId: string, setStatus: (s: string) => void): Promise<Loaded> {
   const name = file.name.replace(/\.[^.]+$/, "");
-  const isCsv = file.name.toLowerCase().endsWith(".csv");
+  // Delimited text: .csv, .tsv and .txt; the delimiter (comma, semicolon, tab, |) is detected.
+  const isCsv = /\.(csv|tsv|txt)$/i.test(file.name);
   const bytes = new Uint8Array(await file.arrayBuffer());
   setStatus(`Opening ${file.name} (${(bytes.length / 1e6).toFixed(1)} MB)…`);
   await nextFrame();
-  const raw = isCsv ? SheetsDocument.fromCsv(new TextDecoder().decode(bytes)) : SheetsDocument.fromXlsx(bytes);
+  const raw = isCsv ? SheetsDocument.fromCsvWith(new TextDecoder().decode(bytes), "auto", name) : SheetsDocument.fromXlsx(bytes);
   // An .xlsx is stored as-is (no need to write it out again to autosave it).
   // Storing a big file takes a moment, so it happens after the grid shows.
   if (!isCsv) setTimeout(() => void saveDocument(docId, "sheets", name, bytes), 0);

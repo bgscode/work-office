@@ -420,6 +420,58 @@ const ICONS: Record<string, Paths> = {
       <rect x="1.5" y="1.5" width="8" height="8" {...s} fill="#fff" />
     </>
   ),
+  margins: () => (
+    <>
+      <rect x="2.5" y="1.5" width="11" height="13" {...s} />
+      <path d="M2.5 4h11M2.5 12h11M5 1.5v13M11 1.5v13" {...s} stroke={BLUE} strokeDasharray="1 1" />
+    </>
+  ),
+  orientation: () => (
+    <>
+      <rect x="1.5" y="4.5" width="9" height="10" {...s} />
+      <rect x="6.5" y="1.5" width="8" height="6" {...s} fill="#fff" stroke={BLUE} />
+    </>
+  ),
+  paperSize: () => (
+    <>
+      <path d="M3.5 1.5h6l3 3v10h-9z" {...s} />
+      <path d="M9.5 1.5v3h3" {...s} />
+      <path d="M5.5 8h5M5.5 10.5h5" {...s} stroke={BLUE} />
+    </>
+  ),
+  printArea: () => (
+    <>
+      <rect x="1.5" y="1.5" width="13" height="13" {...s} />
+      <rect x="4" y="4" width="8" height="8" {...s} stroke={BLUE} strokeDasharray="1.5 1" fill={BLUE} fillOpacity={0.15} />
+    </>
+  ),
+  printTitles: () => (
+    <>
+      <rect x="1.5" y="1.5" width="13" height="13" {...s} />
+      <rect x="1.5" y="1.5" width="13" height="3" fill={GREEN} opacity="0.5" />
+      <rect x="1.5" y="1.5" width="3" height="13" fill={GREEN} opacity="0.5" />
+    </>
+  ),
+  pageSetup: () => (
+    <>
+      <path d="M3.5 1.5h6l3 3v10h-9z" {...s} />
+      <circle cx="10.5" cy="11" r="2.5" {...s} fill="#fff" stroke={BLUE} />
+    </>
+  ),
+  gridlines: () => (
+    <>
+      <rect x="1.5" y="1.5" width="13" height="13" {...s} />
+      <path d="M1.5 6h13M1.5 10.5h13M6 1.5v13M10.5 1.5v13" {...s} stroke="#999" />
+    </>
+  ),
+  headings: () => (
+    <>
+      <rect x="1.5" y="1.5" width="13" height="13" {...s} />
+      <rect x="1.5" y="1.5" width="13" height="3" fill="#ddd" />
+      <rect x="1.5" y="1.5" width="3" height="13" fill="#ddd" />
+      <path d="M6.5 3.5h1M10.5 3.5h1M3 7.5v1M3 11.5v1" {...s} />
+    </>
+  ),
   freeze: () => (
     <>
       <rect x="1.5" y="1.5" width="13" height="13" {...s} />

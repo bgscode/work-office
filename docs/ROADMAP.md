@@ -36,6 +36,7 @@ The detailed, feature-by-feature list (with priorities and milestones M1–M7) i
 - ✅ Financial functions
 - ⬜ Dynamic arrays (`FILTER`, `SORT`, `UNIQUE`)
 - ✅ Charts (column, bar, line, area, pie, doughnut, scatter) and pictures
+- ✅ Print, PDF export, page setup; save to disk (Ctrl+S)
 - ✅ Volatile functions (`TODAY`, `RAND`) refreshing on every recalculation
 
 ## Phase 2 — Docs MVP
