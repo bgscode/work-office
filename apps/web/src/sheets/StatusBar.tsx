@@ -5,6 +5,7 @@ import type { SheetsDocument } from "@office/engine";
 import { Icon, Tooltip } from "@office/ui";
 import { MAX_ZOOM, MIN_ZOOM, sliderToZoom, stepZoom, zoomToSlider, type StatusMode } from "./chrome";
 import type { Rect } from "./geometry";
+import { Select } from "./Select";
 
 /** Preset zoom levels in the percentage dropdown. */
 const ZOOM_LEVELS = [0.5, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 2];
@@ -73,7 +74,7 @@ function ZoomControl({ zoom, onZoom }: { zoom: number; onZoom: (z: number) => vo
           <Icon name="plus" size={12} />
         </button>
       </Tooltip>
-      <select className="zoom" aria-label="Zoom" title="Zoom level (Ctrl + mouse wheel)" value={zoom} onChange={(e) => onZoom(Number(e.target.value))}>
+      <Select className="zoom" aria-label="Zoom" title="Zoom level (Ctrl + mouse wheel)" value={zoom} onChange={(e) => onZoom(Number(e.target.value))}>
         {[...new Set([...ZOOM_LEVELS, zoom])]
           .sort((a, b) => a - b)
           .map((z) => (
@@ -81,7 +82,7 @@ function ZoomControl({ zoom, onZoom }: { zoom: number; onZoom: (z: number) => vo
               {Math.round(z * 100)}%
             </option>
           ))}
-      </select>
+      </Select>
     </span>
   );
 }

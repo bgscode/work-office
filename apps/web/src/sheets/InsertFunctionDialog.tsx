@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { functionList, type FunctionInfo } from "@office/engine";
 import { Dialog } from "./Dialog";
 import { searchFunctions } from "./chrome";
+import { Select } from "./Select";
 
 /** Shown under "Most commonly used", in this order. */
 export const COMMON_FUNCTIONS = ["SUM", "AVERAGE", "IF", "COUNT", "MAX", "MIN", "VLOOKUP", "XLOOKUP", "SUMIF", "COUNTIF", "ROUND", "IFERROR", "TODAY", "CONCAT", "INDEX", "MATCH"];
@@ -77,7 +78,7 @@ export function InsertFunctionDialog({ onInsert, onClose }: Props) {
       </label>
       <label className="dialog-field inline">
         <span>Or select a category:</span>
-        <select
+        <Select
           aria-label="Function category"
           value={query.trim() ? "search" : category}
           onChange={(e) => {
@@ -89,7 +90,7 @@ export function InsertFunctionDialog({ onInsert, onClose }: Props) {
           {query.trim() && <option value="search">Recommended</option>}
           <option value="common">Most commonly used</option>
           <option value="all">All</option>
-        </select>
+        </Select>
       </label>
       <div className="dialog-field">
         <span id="fn-list-label">Select a function:</span>

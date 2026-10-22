@@ -6,6 +6,8 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Added
 
+- One Excel-style dropdown (`Select`) everywhere instead of the browser's: ribbon, dialogs, status bar. Font, size and other dropdown lists open above the ribbon instead of being clipped. The duplicate "Paste special" box is gone (it is in the Paste menu, as in Excel), and the active ribbon tab has a single underline.
+
 - Data tools (M4): AutoFilter (Ctrl+Shift+L) with Excel's header dropdowns: value checklist with search, Text/Number Filters (custom conditions with wildcards), Top 10, above/below average, sort from the header, Clear and Reapply, blue row numbers and "N of M records found"; Custom Sort with several levels; Remove Duplicates; Data Validation (lists with an in-cell dropdown and Alt+↓, number/date/time/text-length limits, custom formulas, input messages, Stop/Warning/Information alerts, Circle Invalid Data); Conditional Formatting (highlight rules, top/bottom, above/below average, duplicates, dates, formulas, data bars, colour scales, Manage Rules). All saved in .xlsx. Enter after a run of Tab entries returns to the starting column, like Excel.
 
 - Formulas (M3): references to other sheets with workbook-wide recalculation, kept correct when sheets are renamed or deleted and when rows/columns move; pointing at cells on another sheet while typing a formula; whole column/row references (`A:A`, `1:1`) without per-cell cost; F4; volatile functions; `ROW`, `COLUMN`, `ROWS`, `COLUMNS`, `OFFSET`, `INDIRECT`, `ADDRESS`, `SUBTOTAL`, `AGGREGATE`, financial functions (`PMT`, `NPV`, `IRR`, `XIRR`, `RATE`…), percentiles and quartiles (158 functions). Date, time and loan functions get Excel's default number formats.

@@ -67,6 +67,7 @@ import { ColumnLayout, DEFAULT_COL_WIDTH } from "./layout";
 import { StatusBar } from "./StatusBar";
 import { WorkbookTitle, type SaveStatus } from "./WorkbookTitle";
 import { Icon } from "@office/ui";
+import { Select } from "./Select";
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 /** Listed first in autocomplete when they match, since most people want these. */
@@ -1137,35 +1138,6 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
         { id: "cut", label: "Cut", shortcut: `${MOD_KEY}X`, icon: "cut", size: "small", group: "Clipboard", onRun: () => navigator.clipboard?.writeText(cut()) },
         { id: "copy", label: "Copy", shortcut: `${MOD_KEY}C`, icon: "copy", size: "small", group: "Clipboard", onRun: () => navigator.clipboard?.writeText(copy()) },
         painterCommand(formatting),
-        {
-          id: "paste-special",
-          label: "Paste special",
-          title: "Paste only values, formulas or formatting, or swap rows and columns.",
-          size: "small",
-          group: "Clipboard",
-          render: () => (
-            <label className="ribbon-select-wrap small">
-              <Icon name="pasteSpecial" />
-              <select
-                className="ribbon-select bare"
-                aria-label="Paste special"
-                value=""
-                onChange={(e) => {
-                  const [mode, t] = e.target.value.split(":");
-                  pasteSpecial(mode as "all" | "values" | "formulas" | "formats", t === "t");
-                }}
-              >
-                <option value="" disabled>
-                  Paste special…
-                </option>
-                <option value="values">Values only</option>
-                <option value="formats">Formatting only</option>
-                <option value="formulas">Formulas only</option>
-                <option value="all:t">Transpose</option>
-              </select>
-            </label>
-          ),
-        },
         ...fontCommands(formatting),
         { id: "bold", newRow: true, label: "Bold", shortcut: `${MOD_KEY}B`, title: "Make your text bold.", icon: "bold", group: "Font", active: !!activeStyle.b, onRun: () => toggle("bold", !!activeStyle.b) },
         { id: "italic", label: "Italic", shortcut: `${MOD_KEY}I`, title: "Italicize your text.", icon: "italic", group: "Font", active: !!activeStyle.i, onRun: () => toggle("italic", !!activeStyle.i) },
@@ -1197,7 +1169,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
           title: "Choose how values in your cells are displayed: as a percentage, currency, date or time, etc.",
           group: "Number",
           render: () => (
-            <select className="ribbon-select number-format" aria-label="Number format" value={formatKind} onChange={(e) => format("format", e.target.value)}>
+            <Select className="number-format" aria-label="Number format" value={formatKind} onChange={(e) => format("format", e.target.value)}>
               <option value="general">General</option>
               <option value="number">Number (1,234.50)</option>
               <option value="currency">Rupee (₹1,234.50)</option>
@@ -1207,7 +1179,7 @@ export function SheetsApp({ docId, initialDoc, journal, initialName, initiallySa
               <option value="time">Time (14:30)</option>
               <option value="datetime">Date &amp; time</option>
               <option value="text">Text</option>
-            </select>
+            </Select>
           ),
         },
         { id: "fmt-currency", label: "Currency Format", title: "Format as Indian rupees (₹1,234.50).", icon: "currency", group: "Number", newRow: true, active: formatKind === "currency", onRun: () => format("format", "currency") },

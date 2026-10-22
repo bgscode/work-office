@@ -3,6 +3,8 @@
 // Escape or clicking away restores the current value.
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { usePopupPosition } from "../Select";
 
 export interface ComboBoxProps {
   label: string;
@@ -37,12 +39,15 @@ export function ComboBox({ label, value, options, onCommit, onDone, width, rende
   const listRef = useRef<HTMLUListElement>(null);
   const listId = useId();
   const shown = text ?? value;
+  // The list opens in a portal so the ribbon's overflow never clips it.
+  const popup = usePopupPosition(rootRef, open, 320);
 
   // Close when clicking elsewhere.
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) close(false);
+      const t = e.target as Node;
+      if (!rootRef.current?.contains(t) && !listRef.current?.contains(t)) close(false);
     };
     window.addEventListener("mousedown", onDown, true);
     return () => window.removeEventListener("mousedown", onDown, true);
@@ -50,7 +55,7 @@ export function ComboBox({ label, value, options, onCommit, onDone, width, rende
 
   useEffect(() => {
     if (open && active >= 0) listRef.current?.children[active]?.scrollIntoView({ block: "nearest" });
-  }, [open, active]);
+  }, [open, active, popup]);
 
   function openList() {
     setOpen(true);
@@ -93,7 +98,8 @@ export function ComboBox({ label, value, options, onCommit, onDone, width, rende
           if (m >= 0) setOpen(true);
         }}
         onBlur={(e) => {
-          if (!rootRef.current?.contains(e.relatedTarget as Node)) {
+          const to = e.relatedTarget as Node | null;
+          if (!rootRef.current?.contains(to) && !listRef.current?.contains(to)) {
             setOpen(false);
             setText(null);
           }
@@ -137,8 +143,10 @@ export function ComboBox({ label, value, options, onCommit, onDone, width, rende
           <path d="M0 0h8L4 5z" fill="currentColor" />
         </svg>
       </button>
-      {open && (
-        <ul ref={listRef} id={listId} role="listbox" aria-label={label} className="fmt-combo-list">
+      {open &&
+        popup &&
+        createPortal(
+        <ul ref={listRef} id={listId} role="listbox" aria-label={label} className="xl-popup-list" style={popup}>
           {options.map((o, i) => (
             <li
               key={o}
@@ -155,8 +163,9 @@ export function ComboBox({ label, value, options, onCommit, onDone, width, rende
               {renderOption ? renderOption(o) : o}
             </li>
           ))}
-        </ul>
-      )}
+        </ul>,
+          document.body,
+        )}
     </div>
   );
 }

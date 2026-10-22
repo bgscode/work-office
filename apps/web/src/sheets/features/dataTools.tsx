@@ -9,6 +9,7 @@ import type { SheetsDocument } from "@office/engine";
 import type { RibbonCommand, RibbonMenuItem } from "@office/ui";
 import { Dialog } from "../Dialog";
 import { colName, type Rect } from "../geometry";
+import { Select } from "../Select";
 
 // ---------------------------------------------------------------- shared types
 
@@ -403,13 +404,13 @@ export function CustomFilterDialog(props: { doc: SheetsDocument; sheet: number; 
   }
   const row = (i: number) => (
     <div className="dialog-row" key={i}>
-      <select aria-label={`Condition ${i + 1}`} value={ops[i]} onChange={(e) => setOps((o) => o.map((v, j) => (j === i ? e.target.value : v)))}>
+      <Select aria-label={`Condition ${i + 1}`} value={ops[i]} onChange={(e) => setOps((o) => o.map((v, j) => (j === i ? e.target.value : v)))}>
         {FILTER_OPS.map((o) => (
           <option key={o.id} value={o.id}>
             {o.label}
           </option>
         ))}
-      </select>
+      </Select>
       <input
         aria-label={`Value ${i + 1}`}
         autoFocus={i === 0}
@@ -452,15 +453,15 @@ export function Top10Dialog(props: { doc: SheetsDocument; sheet: number; col: nu
   return (
     <Dialog title="Top 10 AutoFilter" onClose={props.onClose} width={380} footer={<>{button("OK", ok, { primary: true, disabled: !valid })}{button("Cancel", props.onClose)}</>}>
       <div className="dialog-row">
-        <select aria-label="Top or bottom" value={top ? "top" : "bottom"} onChange={(e) => setTop(e.target.value === "top")}>
+        <Select aria-label="Top or bottom" value={top ? "top" : "bottom"} onChange={(e) => setTop(e.target.value === "top")}>
           <option value="top">Top</option>
           <option value="bottom">Bottom</option>
-        </select>
+        </Select>
         <input aria-label="How many" inputMode="numeric" value={value} autoFocus onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ok()} style={{ width: 70 }} />
-        <select aria-label="Items or percent" value={percent ? "percent" : "items"} onChange={(e) => setPercent(e.target.value === "percent")}>
+        <Select aria-label="Items or percent" value={percent ? "percent" : "items"} onChange={(e) => setPercent(e.target.value === "percent")}>
           <option value="items">Items</option>
           <option value="percent">Percent</option>
-        </select>
+        </Select>
       </div>
     </Dialog>
   );
@@ -568,20 +569,20 @@ export function SortDialog(props: { doc: SheetsDocument; sheet: number; sel: Rec
             <tr key={i} className={i === current ? "current" : undefined} onMouseDown={() => setCurrent(i)}>
               <td>{i === 0 ? "Sort by" : "Then by"}</td>
               <td>
-                <select aria-label={`Level ${i + 1} column`} value={l.col} onChange={(e) => update(i, { col: Number(e.target.value) })}>
+                <Select aria-label={`Level ${i + 1} column`} value={l.col} onChange={(e) => update(i, { col: Number(e.target.value) })}>
                   {columns.map((c) => (
                     <option key={c} value={c}>
                       {label(c)}
                     </option>
                   ))}
-                </select>
+                </Select>
               </td>
               <td>Cell Values</td>
               <td>
-                <select aria-label={`Level ${i + 1} order`} value={l.ascending ? "asc" : "desc"} onChange={(e) => update(i, { ascending: e.target.value === "asc" })}>
+                <Select aria-label={`Level ${i + 1} order`} value={l.ascending ? "asc" : "desc"} onChange={(e) => update(i, { ascending: e.target.value === "asc" })}>
                   <option value="asc">A to Z / Smallest to Largest</option>
                   <option value="desc">Z to A / Largest to Smallest</option>
-                </select>
+                </Select>
               </td>
             </tr>
           ))}
@@ -760,13 +761,13 @@ export function ValidationDialog(props: { doc: SheetsDocument; sheet: number; se
         <p className="dialog-label">Validation criteria</p>
         <label className="dialog-field">
           <span>Allow:</span>
-          <select aria-label="Allow" value={rule.kind} onChange={(e) => set({ kind: e.target.value })}>
+          <Select aria-label="Allow" value={rule.kind} onChange={(e) => set({ kind: e.target.value })}>
             {VALIDATION_KINDS.map(([id, label]) => (
               <option key={id} value={id}>
                 {label}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         {rule.kind !== "none" && (
           <label className="dialog-check">
@@ -781,13 +782,13 @@ export function ValidationDialog(props: { doc: SheetsDocument; sheet: number; se
         {ranged && (
           <label className="dialog-field">
             <span>Data:</span>
-            <select aria-label="Data" value={rule.operator} onChange={(e) => set({ operator: e.target.value })}>
+            <Select aria-label="Data" value={rule.operator} onChange={(e) => set({ operator: e.target.value })}>
               {VALIDATION_OPS.map(([id, label]) => (
                 <option key={id} value={id}>
                   {label}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
         )}
         {ranged && (
@@ -842,11 +843,11 @@ export function ValidationDialog(props: { doc: SheetsDocument; sheet: number; se
         <p className="dialog-label">When user enters invalid data, show this error alert:</p>
         <label className="dialog-field">
           <span>Style:</span>
-          <select aria-label="Style" value={rule.errorStyle} onChange={(e) => set({ errorStyle: e.target.value as ValidationRule["errorStyle"] })}>
+          <Select aria-label="Style" value={rule.errorStyle} onChange={(e) => set({ errorStyle: e.target.value as ValidationRule["errorStyle"] })}>
             <option value="stop">Stop</option>
             <option value="warning">Warning</option>
             <option value="information">Information</option>
-          </select>
+          </Select>
         </label>
         <label className="dialog-field">
           <span>Title:</span>
@@ -1077,20 +1078,20 @@ export function CfRuleDialog(props: { doc: SheetsDocument; sheet: number; sel: R
     );
   } else if (rule === "timePeriod") {
     field = (
-      <select aria-label="Date occurring" value={choice} onChange={(e) => setChoice(e.target.value)} autoFocus>
+      <Select aria-label="Date occurring" value={choice} onChange={(e) => setChoice(e.target.value)} autoFocus>
         {TIME_PERIODS.map(([id, label]) => (
           <option key={id} value={id}>
             {label}
           </option>
         ))}
-      </select>
+      </Select>
     );
   } else if (rule === "duplicates") {
     field = (
-      <select aria-label="Duplicate or unique" value={choice} onChange={(e) => setChoice(e.target.value)} autoFocus>
+      <Select aria-label="Duplicate or unique" value={choice} onChange={(e) => setChoice(e.target.value)} autoFocus>
         <option value="duplicates">Duplicate</option>
         <option value="unique">Unique</option>
-      </select>
+      </Select>
     );
   } else if (rule !== "above" && rule !== "below") {
     field = (
@@ -1107,13 +1108,13 @@ export function CfRuleDialog(props: { doc: SheetsDocument; sheet: number; sel: R
       {field}
       <div className="dialog-row">
         <span>{rule === "duplicates" ? "values with" : "with"}</span>
-        <select aria-label="Format" value={format} onChange={(e) => setFormat(e.target.value)}>
+        <Select aria-label="Format" value={format} onChange={(e) => setFormat(e.target.value)}>
           {CF_FORMATS.map(([id, label]) => (
             <option key={id} value={id}>
               {label}
             </option>
           ))}
-        </select>
+        </Select>
         <span className="cf-preview" style={{ background: preview[2] || "#fff", color: preview[3] || "#000" }}>
           AaBbCc
         </span>
