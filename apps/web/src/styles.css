@@ -80,10 +80,6 @@ button {
   padding: 6px 10px;
 }
 
-.ribbon-tabs button.active {
-  border-bottom: 2px solid var(--brand);
-  color: var(--brand);
-}
 
 .ribbon-commands {
   display: flex;

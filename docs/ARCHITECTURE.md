@@ -22,6 +22,14 @@ services/server               auth, storage, collaboration (planned)
 The desktop app (`apps/desktop`, planned) will wrap `apps/web` with Tauri and
 call the same Rust crates natively instead of through WebAssembly.
 
+## App shell
+
+`apps/web/src/App.tsx` picks the page from the URL hash (`router.ts`): `#/` is the Home page (`home/HomePage.tsx`), `#/sheets/<document id>` opens a workbook. `documents.ts` stores every document's bytes (`.xlsx` for Sheets) and a Recent index in `localStorage`; Home lists them and the app autosaves into them. The title bar (`chrome/TitleBar.tsx`) belongs to the shell; each app fills its middle through a portal (`chrome/titleSlot.ts`).
+
+## Saving and opening
+
+`sheets/SheetsLoader.tsx` opens a workbook (from IndexedDB or a picked file) behind an "Opening…" screen. The document is wrapped by `sheets/journal.ts`, which records every call that changes it; autosave stores that journal in IndexedDB after each edit and rewrites the full `.xlsx` only when it is cheap or after a pause. Opening replays the journal over the last full save. Numbers and how to benchmark: [PERFORMANCE.md](PERFORMANCE.md).
+
 ## What happens when you type `=SUM(A1:A3)` and press Enter
 
 1. `Grid.tsx` (the focused cell input) reports the draft; `SheetsApp.tsx` commits it with
@@ -34,6 +42,19 @@ call the same Rust crates natively instead of through WebAssembly.
    the engine for `displayBlock` / `kindBlock` / `styleBlock` of the viewport
    (`apps/web/src/sheets/paint.ts`).
 
+## Data tools
+
+AutoFilter (`filter.rs`), Data Validation (`validation.rs`) and Conditional
+Formatting (`conditional_format.rs`) live in `Sheet::data_tools()` and are
+changed as a whole with `SetDataTools`. A filter hides rows only when it is
+applied (as in Excel); those rows join the user's hidden rows in
+`Sheet::is_row_hidden`, so `SUBTOTAL`, the grid and the row layout all see
+them. Conditional formats are evaluated per painted block (`cfBlock`); the
+range statistics they need (ranks, averages, duplicates) are computed once per
+change and cached in `crates/wasm`. The UI is in
+`apps/web/src/sheets/features/dataTools.tsx`; `.xlsx` reading and writing in
+`crates/formats/src/xlsx_data_tools.rs`, within the single worksheet pass.
+
 ## Kinds of edits
 
 | Edit | Engine op | Undo |
@@ -43,6 +64,8 @@ call the same Rust crates natively instead of through WebAssembly.
 | Fill handle, paste within Office | `Batch(SetCells, SetStyles)` | both |
 | Column width | `SetColWidths` | previous widths |
 | Insert/delete rows or columns, sort | `ReplaceSheet` (formulas rewritten by `formula/refs.rs`) | the old sheet |
+| Filter, data validation, conditional formatting | `SetDataTools` (`data_tools.rs`) | previous settings |
+| Remove duplicates, custom sort, sort from a filter | `ReplaceSheet` | the old sheet |
 | Add/rename/delete sheet | `InsertSheet`, `RenameSheet`, `RemoveSheet` | the inverse op |
 
 ## Design rules

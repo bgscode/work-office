@@ -8,6 +8,7 @@
 
 pub mod csv;
 pub mod xlsx;
+pub mod xml;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {

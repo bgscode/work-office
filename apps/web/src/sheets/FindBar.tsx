@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Icon } from "@office/ui";
 
 export interface FindOptions {
   matchCase: boolean;
@@ -42,11 +43,22 @@ export function FindBar({ withReplace, onFind, onReplace, onReplaceAll, onClose 
   };
 
   return (
-    <div className="find-bar" role="search">
-      <div className="find-row">
-        <button className="toggle" title="Show replace" aria-expanded={showReplace} onClick={() => setShowReplace(!showReplace)}>
-          {showReplace ? "▾" : "▸"}
+    <div className="find-bar" role="search" aria-label="Find and Replace">
+      <div className="find-header">
+        <span className="find-title">Find and Replace</span>
+        <div className="find-tabs" role="tablist">
+          <button role="tab" aria-selected={!showReplace} onClick={() => setShowReplace(false)}>
+            Find
+          </button>
+          <button role="tab" aria-selected={showReplace} onClick={() => setShowReplace(true)}>
+            Replace
+          </button>
+        </div>
+        <button className="find-close" aria-label="Close" title="Close (Esc)" onClick={onClose}>
+          <Icon name="close" size={12} />
         </button>
+      </div>
+      <div className="find-row">
         <input
           ref={ref}
           placeholder="Find"
@@ -58,19 +70,15 @@ export function FindBar({ withReplace, onFind, onReplace, onReplaceAll, onClose 
           }}
           onKeyDown={(e) => keys(e, () => find(!e.shiftKey))}
         />
-        <button title="Previous (Shift+Enter)" onClick={() => find(false)}>
-          ↑
+        <button title="Find Previous (Shift+Enter)" aria-label="Find Previous" onClick={() => find(false)}>
+          <Icon name="chevronUp" size={12} />
         </button>
-        <button title="Next (Enter)" onClick={() => find(true)}>
-          ↓
-        </button>
-        <button title="Close (Esc)" onClick={onClose}>
-          ×
+        <button title="Find Next (Enter)" aria-label="Find Next" onClick={() => find(true)}>
+          <Icon name="chevronDown" size={12} />
         </button>
       </div>
       {showReplace && (
         <div className="find-row">
-          <span className="toggle" />
           <input
             placeholder="Replace with"
             aria-label="Replace with"
@@ -88,7 +96,7 @@ export function FindBar({ withReplace, onFind, onReplace, onReplaceAll, onClose 
               setMessage(n === 0 ? "No matches" : `Replaced ${n} cell${n === 1 ? "" : "s"}`);
             }}
           >
-            All
+            Replace All
           </button>
         </div>
       )}

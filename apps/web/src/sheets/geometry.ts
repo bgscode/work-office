@@ -1,10 +1,10 @@
 // Grid sizes and pure selection math. No React or engine imports here, so it
 // is easy to unit-test (see geometry.test.ts).
 
-export const ROW_HEIGHT = 22;
+export const ROW_HEIGHT = 20;
 
 export const HEADER_WIDTH = 50;
-export const HEADER_HEIGHT = 24;
+export const HEADER_HEIGHT = 20;
 export const MAX_ROWS = 1_048_576;
 export const MAX_COLS = 16_384;
 
@@ -17,6 +17,8 @@ export interface Cell {
 export interface Selection {
   anchor: Cell;
   focus: Cell;
+  /** Set when merged cells widen the selected range beyond anchor..focus (see merges.ts). */
+  span?: Rect;
 }
 
 export interface Rect {
@@ -48,6 +50,7 @@ export function rangeName(s: Selection): string {
 }
 
 export function selectionRect(s: Selection): Rect {
+  if (s.span) return s.span;
   return {
     top: Math.min(s.anchor.row, s.focus.row),
     left: Math.min(s.anchor.col, s.focus.col),

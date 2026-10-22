@@ -103,6 +103,57 @@ pub fn stdevp(args: &[Arg]) -> Result<Value, ErrorKind> {
     Ok(Value::Number(variance(args, false)?.sqrt()))
 }
 
+/// Value at fraction `k` of the sorted data. Inclusive: rank k*(n-1);
+/// exclusive: rank k*(n+1)-1 (0-based), `#NUM!` outside the data.
+fn percentile_of(args: &[Arg], k: f64, inclusive: bool) -> Result<Value, ErrorKind> {
+    let nums = sorted(&args[..1])?;
+    let n = nums.len();
+    if n == 0 {
+        return Err(ErrorKind::Num);
+    }
+    let rank = if inclusive {
+        if !(0.0..=1.0).contains(&k) {
+            return Err(ErrorKind::Num);
+        }
+        k * (n - 1) as f64
+    } else {
+        let r = k * (n + 1) as f64 - 1.0;
+        if k <= 0.0 || k >= 1.0 || r < 0.0 || r > (n - 1) as f64 {
+            return Err(ErrorKind::Num);
+        }
+        r
+    };
+    let lo = rank.floor() as usize;
+    let hi = (lo + 1).min(n - 1);
+    Ok(Value::Number(nums[lo] + (rank - lo as f64) * (nums[hi] - nums[lo])))
+}
+
+pub fn percentile_inc(args: &[Arg]) -> Result<Value, ErrorKind> {
+    percentile_of(args, args[1].number()?, true)
+}
+
+pub fn percentile_exc(args: &[Arg]) -> Result<Value, ErrorKind> {
+    percentile_of(args, args[1].number()?, false)
+}
+
+/// QUARTILE.INC: quart 0 (min) to 4 (max).
+pub fn quartile_inc(args: &[Arg]) -> Result<Value, ErrorKind> {
+    let q = args[1].number()?.trunc();
+    if !(0.0..=4.0).contains(&q) {
+        return Err(ErrorKind::Num);
+    }
+    percentile_of(args, q / 4.0, true)
+}
+
+/// QUARTILE.EXC: quart 1 to 3.
+pub fn quartile_exc(args: &[Arg]) -> Result<Value, ErrorKind> {
+    let q = args[1].number()?.trunc();
+    if !(1.0..=3.0).contains(&q) {
+        return Err(ErrorKind::Num);
+    }
+    percentile_of(args, q / 4.0, false)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::functions::test_util::{n, run};
@@ -152,5 +203,20 @@ mod tests {
         assert_eq!(run("STDEV(1)"), Value::Error(ErrorKind::Div0));
         assert_eq!(run("VARP(B1:B5)"), Value::Error(ErrorKind::Div0));
         assert_eq!(run("STDEVP(7)"), n(0.0));
+    }
+
+    #[test]
+    fn percentiles_and_quartiles() {
+        approx("PERCENTILE(A1:A5, 0.3)", 2.2);
+        approx("PERCENTILE.INC(A1:A5, 1)", 5.0);
+        approx("PERCENTILE.EXC(A1:A5, 0.5)", 3.0);
+        approx("PERCENTILE.EXC(A1:A5, 0.25)", 1.5);
+        approx("QUARTILE(A1:A5, 1)", 2.0);
+        approx("QUARTILE.INC(A1:A5, 4)", 5.0);
+        approx("QUARTILE.EXC(A1:A5, 3)", 4.5);
+        assert_eq!(run("PERCENTILE(A1:A5, 1.5)"), Value::Error(ErrorKind::Num));
+        assert_eq!(run("PERCENTILE.EXC(A1:A5, 0.1)"), Value::Error(ErrorKind::Num));
+        assert_eq!(run("QUARTILE.EXC(A1:A5, 0)"), Value::Error(ErrorKind::Num));
+        assert_eq!(run("PERCENTILE(B1:B5, 0.5)"), Value::Error(ErrorKind::Num));
     }
 }

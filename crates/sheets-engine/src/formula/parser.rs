@@ -7,11 +7,12 @@
 //! 5. `^` (left-associative, as in Excel: 2^3^2 = 64)
 //! 6. postfix `%`
 //! 7. prefix `-` / `+` (binds tighter than `^`, as in Excel: -2^2 = 4)
-//! 8. primary: number, "text", TRUE/FALSE, A1, A1:B2, FUNC(args), (expr)
+//! 8. primary: number, "text", TRUE/FALSE, A1, A1:B2, A:A, 1:1, Sheet2!A1,
+//!    'My Sheet'!A1:B5, FUNC(args), (expr)
 
 use super::ast::{BinOp, Expr, UnaryOp};
 use super::lexer::{tokenize, Token};
-use crate::cell::{CellRef, Range};
+use crate::cell::{parse_col, CellRef, Range, MAX_COLS, MAX_ROWS};
 use crate::value::ErrorKind;
 
 /// Parse formula text without the leading `=`.
@@ -129,7 +130,24 @@ impl Parser {
 
     fn primary(&mut self) -> Result<Expr, ErrorKind> {
         match self.next().ok_or(ErrorKind::Parse)? {
-            Token::Number(n) => Ok(Expr::Number(n)),
+            Token::Number(n) => match self.row_range(&format_row(n)) {
+                Some(r) => Ok(Expr::Range(r?)),
+                None => Ok(Expr::Number(n)),
+            },
+            Token::Sheet(sheet) => match self.next() {
+                Some(Token::Ident(name)) => match self.ident(name)? {
+                    Expr::Ref(c) => Ok(Expr::SheetRef(sheet, c)),
+                    Expr::Range(r) => Ok(Expr::SheetRange(sheet, r)),
+                    _ => Err(ErrorKind::Parse),
+                },
+                Some(Token::Number(n)) => match self.row_range(&format_row(n)) {
+                    Some(r) => Ok(Expr::SheetRange(sheet, r?)),
+                    None => Err(ErrorKind::Parse),
+                },
+                // Excel writes `Sheet2!#REF!` for a deleted reference.
+                Some(Token::Error(e)) => Ok(Expr::Error(e)),
+                _ => Err(ErrorKind::Parse),
+            },
             Token::Text(s) => Ok(Expr::Text(s)),
             Token::Error(e) => Ok(Expr::Error(e)),
             Token::LParen => {
@@ -166,6 +184,9 @@ impl Parser {
         if name.eq_ignore_ascii_case("FALSE") {
             return Ok(Expr::Bool(false));
         }
+        if let Some(r) = self.col_range(&name).or_else(|| self.row_range(&name)) {
+            return Ok(Expr::Range(r?));
+        }
         let Some(start) = CellRef::parse(&name) else {
             return Ok(Expr::Name(name));
         };
@@ -178,6 +199,63 @@ impl Parser {
         }
         Ok(Expr::Ref(start))
     }
+
+    /// `A:C` (whole columns) when `first` is a column and a `:column` follows.
+    fn col_range(&mut self, first: &str) -> Option<Result<Range, ErrorKind>> {
+        let a = col_only(first)?;
+        if self.peek() != Some(&Token::Colon) {
+            return None;
+        }
+        self.pos += 1;
+        let b = match self.next() {
+            Some(Token::Ident(s)) => col_only(&s),
+            _ => None,
+        };
+        Some(b.map(|b| Range::new(CellRef::new(0, a), CellRef::new(MAX_ROWS - 1, b))).ok_or(ErrorKind::Parse))
+    }
+
+    /// `1:3` (whole rows) when `first` is a row number and a `:row` follows.
+    fn row_range(&mut self, first: &str) -> Option<Result<Range, ErrorKind>> {
+        let a = row_only(first)?;
+        if self.peek() != Some(&Token::Colon) {
+            return None;
+        }
+        self.pos += 1;
+        let b = match self.next() {
+            Some(Token::Ident(s)) => row_only(&s),
+            Some(Token::Number(n)) => row_only(&format_row(n)),
+            _ => None,
+        };
+        Some(b.map(|b| Range::new(CellRef::new(a, 0), CellRef::new(b, MAX_COLS - 1))).ok_or(ErrorKind::Parse))
+    }
+}
+
+/// A whole number token as row text ("" for anything else, which `row_only` rejects).
+fn format_row(n: f64) -> String {
+    if n.fract() == 0.0 && n >= 1.0 && n <= MAX_ROWS as f64 {
+        format!("{}", n as u32)
+    } else {
+        String::new()
+    }
+}
+
+/// `A`, `$XFD` -> zero-based column.
+fn col_only(s: &str) -> Option<u32> {
+    let letters = s.strip_prefix('$').unwrap_or(s);
+    if letters.is_empty() || !letters.bytes().all(|b| b.is_ascii_alphabetic()) {
+        return None;
+    }
+    parse_col(letters)
+}
+
+/// `1`, `$20` -> zero-based row.
+fn row_only(s: &str) -> Option<u32> {
+    let digits = s.strip_prefix('$').unwrap_or(s);
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let n: u32 = digits.parse().ok()?;
+    (1..=MAX_ROWS).contains(&n).then(|| n - 1)
 }
 
 #[cfg(test)]
@@ -214,6 +292,28 @@ mod tests {
             parse("#REF!+1").unwrap(),
             Expr::Binary(BinOp::Add, Box::new(Expr::Error(ErrorKind::Ref)), num(1.0))
         );
+    }
+
+    #[test]
+    fn parses_whole_columns_rows_and_sheet_refs() {
+        let col = |a, b| Range::new(CellRef::new(0, a), CellRef::new(MAX_ROWS - 1, b));
+        let row = |a, b| Range::new(CellRef::new(a, 0), CellRef::new(b, MAX_COLS - 1));
+        assert_eq!(parse("A:A").unwrap(), Expr::Range(col(0, 0)));
+        assert_eq!(parse("$B:$D").unwrap(), Expr::Range(col(1, 3)));
+        assert_eq!(parse("1:1").unwrap(), Expr::Range(row(0, 0)));
+        assert_eq!(parse("$3:5").unwrap(), Expr::Range(row(2, 4)));
+        assert_eq!(parse("Sheet2!B3").unwrap(), Expr::SheetRef("Sheet2".into(), CellRef::new(2, 1)));
+        assert_eq!(
+            parse("'My Sheet'!A1:B5").unwrap(),
+            Expr::SheetRange("My Sheet".into(), Range::new(CellRef::new(0, 0), CellRef::new(4, 1)))
+        );
+        assert_eq!(parse("Data!C:C").unwrap(), Expr::SheetRange("Data".into(), col(2, 2)));
+        assert_eq!(parse("Data!2:2").unwrap(), Expr::SheetRange("Data".into(), row(1, 1)));
+        assert_eq!(parse("Data!#REF!").unwrap(), Expr::Error(ErrorKind::Ref));
+        assert_eq!(parse("1+2").unwrap(), Expr::Binary(BinOp::Add, num(1.0), num(2.0)));
+        for bad in ["A:", "A:1", "1:A", "Sheet2!SUM(1)", "Sheet2!", "0:1"] {
+            assert!(parse(bad).is_err(), "{bad} should fail");
+        }
     }
 
     #[test]

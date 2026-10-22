@@ -20,7 +20,10 @@ impl CellRef {
 
     /// Parse an A1-style reference. `$` markers (`$B$12`) are accepted and ignored.
     pub fn parse(s: &str) -> Option<Self> {
-        let s: String = s.chars().filter(|&c| c != '$').collect();
+        if s.contains('$') {
+            let plain: String = s.chars().filter(|&c| c != '$').collect();
+            return Self::parse(&plain);
+        }
         let split = s.find(|c: char| c.is_ascii_digit())?;
         let (letters, digits) = s.split_at(split);
         let col = parse_col(letters)?;
@@ -86,6 +89,15 @@ impl Range {
 
     pub fn single(c: CellRef) -> Self {
         Range { start: c, end: c }
+    }
+
+    pub fn contains(&self, c: CellRef) -> bool {
+        c.row >= self.start.row && c.row <= self.end.row && c.col >= self.start.col && c.col <= self.end.col
+    }
+
+    /// Number of cells, as u64 (a whole sheet is about 17 billion).
+    pub fn area(&self) -> u64 {
+        self.rows() as u64 * self.cols() as u64
     }
 
     pub fn rows(&self) -> u32 {

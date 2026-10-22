@@ -12,21 +12,31 @@
 //!
 //! See `crates/sheets-engine/README.md` for a guided tour.
 
+pub mod borders;
 pub mod cell;
 pub mod chart;
+pub mod conditional_format;
+pub mod data_tools;
 pub mod date;
+pub mod dedupe;
 pub mod fill;
+pub mod filter;
 pub mod format;
 pub mod formula;
 pub mod functions;
+pub mod layout;
 pub mod ops;
+pub mod painter;
 pub mod sheet;
+pub mod sort;
 pub mod style;
+pub mod validation;
 pub mod value;
 pub mod workbook;
 
 pub use cell::{CellRef, Range, MAX_COLS, MAX_ROWS};
 pub use sheet::{FindOptions, Sheet};
 pub use style::{Align, NumberFormat, Style, StylePatch};
+pub use style::{BorderLine, BorderStyle, Borders, Side, VAlign};
 pub use value::{ErrorKind, Value};
 pub use workbook::{Workbook, Worksheet};
