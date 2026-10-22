@@ -10,11 +10,8 @@ import { Icon } from "@office/ui";
 import type { Rect } from "../geometry";
 import { Select } from "../Select";
 import { MARGIN_PRESETS, PAPER_SIZES, SCALING_OPTIONS, paperLabel, pageInches, readPageSetup, scalingChange, scalingId, updatePageSetup } from "./pageSetup";
-import { PX_PER_INCH, buildPrintHtml, layoutJob } from "./printHtml";
+import { PX_PER_INCH, buildPrintHtml, buildPrintHtmlAsync, layoutJob } from "./printHtml";
 import { buildPrintJob, type PrintWhat } from "./printJob";
-
-/** Above this many pages, printing asks first (a big sheet can make thousands). */
-const CONFIRM_PAGES = 200;
 
 interface Props {
   doc: SheetsDocument;
@@ -86,10 +83,20 @@ export function PrintView({ doc, sheet, selection, title, revision, onChanged, o
     if (!updatePageSetup(doc, sheet, changes)) onChanged();
   }
 
-  function print() {
-    if (!pages.length) return;
-    if (pages.length > CONFIRM_PAGES && !confirm(`This will print ${pages.length} pages. Continue?`)) return;
-    printHtml(buildPrintHtml(job, pages));
+  // Big printouts are prepared a slice at a time, with progress and Cancel.
+  const [preparing, setPreparing] = useState<{ done: number; total: number; abort: AbortController } | null>(null);
+  const running = useRef<AbortController | null>(null);
+  // Leaving the Print page stops a printout being prepared.
+  useEffect(() => () => running.current?.abort(), []);
+
+  async function print() {
+    if (!pages.length || preparing) return;
+    const abort = new AbortController();
+    running.current = abort;
+    setPreparing({ done: 0, total: pages.length, abort });
+    const html = await buildPrintHtmlAsync(job, pages, (done, total) => setPreparing((p) => p && { ...p, done, total }), abort.signal);
+    setPreparing(null);
+    if (html) printHtml(html);
   }
 
   const scaling = scalingId(setup);
@@ -100,16 +107,28 @@ export function PrintView({ doc, sheet, selection, title, revision, onChanged, o
           <Icon name="chevronLeft" size={16} /> Print
         </button>
         <div className="print-actions">
-          <button className="print-button" onClick={print} disabled={!pages.length}>
+          <button className="print-button" onClick={() => void print()} disabled={!pages.length || !!preparing}>
             <Icon name="print" size={32} />
             <span>Print</span>
           </button>
-          <button className="print-button secondary" onClick={print} disabled={!pages.length} title="Choose “Save as PDF” as the printer in the dialog that opens.">
+          <button className="print-button secondary" onClick={() => void print()} disabled={!pages.length || !!preparing} title="Choose “Save as PDF” as the printer in the dialog that opens.">
             <Icon name="download" size={32} />
             <span>Export PDF</span>
           </button>
         </div>
-        <p className="print-hint">To save a PDF, pick “Save as PDF” as the destination in the print dialog.</p>
+        {preparing ? (
+          <div className="print-progress" role="status">
+            <span>
+              Preparing page {preparing.done} of {preparing.total}…
+            </span>
+            <progress value={preparing.done} max={preparing.total} />
+            <button className="print-link" onClick={() => preparing.abort.abort()}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <p className="print-hint">To save a PDF, pick “Save as PDF” as the destination in the print dialog.</p>
+        )}
         <h3>Settings</h3>
         <Select aria-label="What to print" value={what} onChange={(e) => (setWhat(e.target.value as PrintWhat), setIndex(0))}>
           <option value="active">Print Active Sheets</option>

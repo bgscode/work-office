@@ -1,3 +1,5 @@
+import { loadFileHandle, storeFileHandle } from "./documents";
+
 /** Ask the user for a file. Resolves to null if they cancel. */
 export function pickFile(accept: string): Promise<File | null> {
   return new Promise((resolve) => {
@@ -25,10 +27,13 @@ export function download(data: BlobPart, fileName: string, type: string) {
 interface WritableFile {
   createWritable(): Promise<{ write(data: BlobPart): Promise<void>; close(): Promise<void> }>;
   name: string;
+  queryPermission?(opts: { mode: "readwrite" }): Promise<PermissionState>;
+  requestPermission?(opts: { mode: "readwrite" }): Promise<PermissionState>;
 }
 type SavePicker = (opts: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) => Promise<WritableFile>;
 
-/** Files chosen with Save As in this session, per workbook: Save writes back to them. */
+/** Files chosen with Save As, per workbook: Save writes back to them. Also kept
+ * in IndexedDB (documents.ts), so this survives a reload. */
 const handles = new Map<string, WritableFile>();
 
 export type SaveResult = { kind: "saved"; name: string } | { kind: "downloaded" } | { kind: "cancelled" };
@@ -51,6 +56,7 @@ export async function saveAs(key: string, data: BlobPart, fileName: string, mime
   try {
     const handle = await picker({ suggestedName: fileName, types: [{ description: "Excel Workbook", accept: { [mime]: [ext] } }] });
     handles.set(key, handle);
+    void storeFileHandle(key, handle);
     await write(handle, data);
     return { kind: "saved", name: handle.name };
   } catch (err) {
@@ -62,7 +68,7 @@ export async function saveAs(key: string, data: BlobPart, fileName: string, mime
 
 /** Save (Ctrl+S): write to the file from the last Save As, else Save As. */
 export async function save(key: string, data: BlobPart, fileName: string, mime: string, ext: string): Promise<SaveResult> {
-  const handle = handles.get(key);
+  const handle = handles.get(key) ?? (await restoreHandle(key));
   if (!handle) return saveAs(key, data, fileName, mime, ext);
   try {
     await write(handle, data);
@@ -72,6 +78,17 @@ export async function save(key: string, data: BlobPart, fileName: string, mime: 
     handles.delete(key);
     return saveAs(key, data, fileName, mime, ext);
   }
+}
+
+/** The file from an earlier session, if the browser still lets us write to it. */
+async function restoreHandle(key: string): Promise<WritableFile | null> {
+  const handle = (await loadFileHandle(key)) as WritableFile | null;
+  if (!handle || typeof handle.createWritable !== "function") return null;
+  // After a reload the browser asks once more (Ctrl+S is the user gesture it needs).
+  const opts = { mode: "readwrite" } as const;
+  if ((await handle.queryPermission?.(opts)) !== "granted" && (await handle.requestPermission?.(opts)) !== "granted") return null;
+  handles.set(key, handle);
+  return handle;
 }
 
 async function write(handle: WritableFile, data: BlobPart) {

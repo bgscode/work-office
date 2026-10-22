@@ -353,9 +353,7 @@ export interface HtmlOptions {
   preview?: boolean;
 }
 
-/** The full HTML document for printing (or previewing) `pages` of `job`. */
-export function buildPrintHtml(job: PrintJob, pages: PageInfo[], opts: HtmlOptions = {}): string {
-  const include = opts.include ?? pages.map((_, i) => i);
+function documentCss(job: PrintJob, preview: boolean): string {
   let pageRules = "";
   job.sheets.forEach((src, i) => {
     const size = pageInches(src.setup);
@@ -363,7 +361,7 @@ export function buildPrintHtml(job: PrintJob, pages: PageInfo[], opts: HtmlOptio
     const height = +size.height.toFixed(4);
     pageRules += `@page s${i}{size:${width}in ${height}in;margin:0}.s${i}{page:s${i};width:${width}in;height:${height}in}`;
   });
-  const css =
+  return (
     `@page{margin:0}` +
     pageRules +
     `html,body{margin:0;padding:0;background:#fff}` +
@@ -379,27 +377,59 @@ export function buildPrintHtml(job: PrintJob, pages: PageInfo[], opts: HtmlOptio
     `td,th{padding:0 ${CELL_PAD}px;overflow:hidden;white-space:pre;vertical-align:bottom;line-height:1.25;border:0}` +
     `table.grid td{border:1px solid #bfbfbf}` +
     `th{font-weight:normal;font-size:11px;text-align:center;vertical-align:middle;border:1px solid #bfbfbf;color:#000}` +
-    (opts.preview ? "" : `@media screen{html,body{background:#e6e6e6}.page{margin:16px auto;box-shadow:0 1px 4px rgba(0,0,0,.3)}}`);
+    (preview ? "" : `@media screen{html,body{background:#e6e6e6}.page{margin:16px auto;box-shadow:0 1px 4px rgba(0,0,0,.3)}}`)
+  );
+}
 
-  const ctxBase = { pages: pages.length, file: job.title, date: job.date };
-  let body = "";
-  for (const index of include) {
-    const page = pages[index];
-    if (!page) continue;
-    const src = job.sheets[page.sheet];
-    const s = src.setup;
-    const m = s.margins;
-    const ctx: HeaderFooterContext = { ...ctxBase, page: index + 1, sheet: src.name };
-    const justify = s.centerH ? "center" : "flex-start";
-    const alignItems = s.centerV ? "center" : "flex-start";
-    body +=
-      `<section class="page s${page.sheet}" data-page="${index + 1}">` +
-      hfHtml(s.header, ctx, "header", `top:${m.header}in;left:${m.left}in;right:${m.right}in`) +
-      `<div class="area" style="top:${m.top}in;left:${m.left}in;right:${m.right}in;bottom:${m.bottom}in;justify-content:${justify};align-items:${alignItems}">` +
-      pageTable(job, page) +
-      `</div>` +
-      hfHtml(s.footer, ctx, "footer", `bottom:${m.footer}in;left:${m.left}in;right:${m.right}in`) +
-      `</section>`;
-  }
+/** One printed page. */
+function pageSection(job: PrintJob, pages: PageInfo[], index: number): string {
+  const page = pages[index];
+  if (!page) return "";
+  const src = job.sheets[page.sheet];
+  const s = src.setup;
+  const m = s.margins;
+  const ctx: HeaderFooterContext = { pages: pages.length, file: job.title, date: job.date, page: index + 1, sheet: src.name };
+  const justify = s.centerH ? "center" : "flex-start";
+  const alignItems = s.centerV ? "center" : "flex-start";
+  return (
+    `<section class="page s${page.sheet}" data-page="${index + 1}">` +
+    hfHtml(s.header, ctx, "header", `top:${m.header}in;left:${m.left}in;right:${m.right}in`) +
+    `<div class="area" style="top:${m.top}in;left:${m.left}in;right:${m.right}in;bottom:${m.bottom}in;justify-content:${justify};align-items:${alignItems}">` +
+    pageTable(job, page) +
+    `</div>` +
+    hfHtml(s.footer, ctx, "footer", `bottom:${m.footer}in;left:${m.left}in;right:${m.right}in`) +
+    `</section>`
+  );
+}
+
+function documentHtml(job: PrintJob, css: string, body: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(job.title)}</title><style>${css}</style></head><body>${body}</body></html>`;
+}
+
+/** The full HTML document for printing (or previewing) `pages` of `job`. */
+export function buildPrintHtml(job: PrintJob, pages: PageInfo[], opts: HtmlOptions = {}): string {
+  const include = opts.include ?? pages.map((_, i) => i);
+  return documentHtml(job, documentCss(job, !!opts.preview), include.map((i) => pageSection(job, pages, i)).join(""));
+}
+
+/**
+ * `buildPrintHtml` for every page, a slice at a time so the app stays
+ * responsive on big sheets (thousands of pages). Resolves to null when
+ * `signal` is aborted.
+ */
+export async function buildPrintHtmlAsync(
+  job: PrintJob,
+  pages: PageInfo[],
+  onProgress: (done: number, total: number) => void,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const parts: string[] = [];
+  const SLICE = 25;
+  for (let i = 0; i < pages.length; i += SLICE) {
+    if (signal.aborted) return null;
+    for (let j = i; j < Math.min(pages.length, i + SLICE); j++) parts.push(pageSection(job, pages, j));
+    onProgress(Math.min(pages.length, i + SLICE), pages.length);
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  return signal.aborted ? null : documentHtml(job, documentCss(job, false), parts.join(""));
 }

@@ -1997,3 +1997,15 @@ textarea.cell-editor {
   border-color: #8a8886;
   background: #fff;
 }
+
+.print-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.print-progress progress {
+  width: 100%;
+  accent-color: var(--xl-green);
+}

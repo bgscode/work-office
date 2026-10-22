@@ -125,8 +125,30 @@ export async function removeDocument(id: string) {
   try {
     await idb("readwrite", (s) => s.delete(id));
     await idb("readwrite", (s) => s.delete(journalKey(id)));
+    await idb("readwrite", (s) => s.delete(handleKey(id)));
   } catch {
     // ignore
+  }
+}
+
+// ---- the file on disk a workbook is saved to (see files.ts)
+
+const handleKey = (id: string) => `handle:${id}`;
+
+/** Remember the file Save As picked, so Ctrl+S writes to it after a reload too. */
+export async function storeFileHandle(id: string, handle: unknown): Promise<void> {
+  try {
+    await idb("readwrite", (s) => s.put(handle, handleKey(id)));
+  } catch {
+    // Not every browser can store file handles; Save As will ask again.
+  }
+}
+
+export async function loadFileHandle(id: string): Promise<unknown> {
+  try {
+    return (await idb("readonly", (s) => s.get(handleKey(id)))) ?? null;
+  } catch {
+    return null;
   }
 }
 

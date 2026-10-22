@@ -6,6 +6,8 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- Ctrl+S remembers the file on disk across reloads (the browser asks once to allow saving again).
+- Big printouts (hundreds or thousands of pages) are prepared in the background with progress and Cancel instead of freezing the app.
 - Freeze Panes works like Excel when the sheet is scrolled: it freezes the rows and columns on screen instead of the first ones, so the grid no longer gets stuck when the frozen part is bigger than the window; scrolled frozen panes in Excel files (`<sheetView topLeftCell>`) open correctly.
 
 ### Added
