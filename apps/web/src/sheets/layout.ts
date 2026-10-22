@@ -131,9 +131,13 @@ export class AxisLayout {
 
   /** A copy with line `i` set to `size` (used to preview a drag-resize). */
   withSize(i: number, size: number): this {
-    const Ctor = this.constructor as new (count: number, def: number, sized: Run[], hidden: Array<[number, number]>) => this;
     const hidden = size > 0 ? this.hidden.filter(([a, b]) => i < a || i > b) : [...this.hidden, [i, i] as [number, number]];
-    return new Ctor(this.count, this.defaultSize, [...this.sized, [i, i, size]], hidden);
+    return this.rebuild([...this.sized, [i, i, size]], hidden);
+  }
+
+  /** The same kind of layout with other sizes. Subclasses take different constructor arguments. */
+  protected rebuild(sized: Run[], hidden: Array<[number, number]>): this {
+    return new AxisLayout(this.count, this.defaultSize, sized, hidden) as this;
   }
 }
 
@@ -142,6 +146,10 @@ export class ColumnLayout extends AxisLayout {
   /** `custom` is the flat [col, px, col, px, ...] list from `columnWidths`; `hidden` is [first, last, ...]. */
   constructor(custom: ArrayLike<number> | Run[] = [], hidden: ArrayLike<number> | Array<[number, number]> = []) {
     super(MAX_COLS, DEFAULT_COL_WIDTH, toRuns(custom), toPairs(hidden));
+  }
+
+  protected rebuild(sized: Run[], hidden: Array<[number, number]>): this {
+    return new ColumnLayout(sized, hidden) as this;
   }
 
   /** Left edge of a column, measured from the left of column A. */
@@ -163,6 +171,10 @@ export class ColumnLayout extends AxisLayout {
 export class RowLayout extends AxisLayout {
   constructor(sized: Run[] = [], hidden: Array<[number, number]> = []) {
     super(MAX_ROWS, DEFAULT_ROW_HEIGHT, sized, hidden);
+  }
+
+  protected rebuild(sized: Run[], hidden: Array<[number, number]>): this {
+    return new RowLayout(sized, hidden) as this;
   }
 
   /** From the engine's `rowLayout`: [n, (first, last, px) × n, (first, last) × rest]. */

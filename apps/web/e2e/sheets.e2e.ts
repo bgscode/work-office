@@ -199,3 +199,22 @@ test("chart title in place, pie colours and a narrow ribbon", async ({ page }) =
   await expect(page.locator(".folded-popup").getByRole("button", { name: "Wrap Text" })).toBeVisible();
   await expectNoErrors(errors);
 });
+
+test("dragging row and column borders resizes them", async ({ page }) => {
+  const { errors, cell } = await openWorkbook(page);
+  const grid = (await page.locator(".grid").boundingBox())!;
+  // Bottom border of row 3 in the row headers, then the right border of column B.
+  const rowBorder = { x: grid.x + 20, y: grid.y + 20 + 3 * 20 };
+  await page.mouse.move(rowBorder.x, rowBorder.y);
+  await page.mouse.down();
+  await page.mouse.move(rowBorder.x, rowBorder.y + 25, { steps: 4 });
+  await page.mouse.up();
+  const colBorder = { x: grid.x + 50 + 2 * 64, y: grid.y + 10 };
+  await page.mouse.move(colBorder.x, colBorder.y);
+  await page.mouse.down();
+  await page.mouse.move(colBorder.x + 40, colBorder.y, { steps: 4 });
+  await page.mouse.up();
+  await expect(page.locator(".crash-screen")).toHaveCount(0);
+  await clickCell(page, await cell(0, 0));
+  await expectNoErrors(errors);
+});

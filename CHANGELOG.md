@@ -6,6 +6,7 @@ All notable changes are recorded here. Format: [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- Clicking or dragging a row border in the row headers crashed the app; dragging a column border lost the other columns' custom widths in the live preview.
 - Opening a file from Home could open an empty workbook instead (a race between navigation and the pending file).
 - Ctrl+S remembers the file on disk across reloads (the browser asks once to allow saving again).
 - Big printouts (hundreds or thousands of pages) are prepared in the background with progress and Cancel instead of freezing the app.
